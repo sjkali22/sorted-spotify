@@ -1,32 +1,33 @@
-import NextAuth from "next-auth";
+import NextAuth, { type NextAuthOptions } from "next-auth";
 import SpotifyProvider from "next-auth/providers/spotify";
 
-const scopes = [
-  "user-read-email",
-  "user-read-private",
-  "user-read-recently-played",
-  "user-top-read",
-  "playlist-read-private",
-  "playlist-modify-public",
-  "playlist-modify-private",
-].join(" ");
+type SpotifyToken = {
+  accessToken?: string;
+  refreshToken?: string;
+  accessTokenExpires?: number; // ms timestamp
+  error?: "RefreshAccessTokenError";
+};
 
-async function refreshSpotifyAccessToken(token: any) {
+async function refreshSpotifyAccessToken(token: SpotifyToken): Promise<SpotifyToken> {
   try {
-    const body = new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: token.refreshToken,
-      client_id: process.env.SPOTIFY_CLIENT_ID!,
-      client_secret: process.env.SPOTIFY_CLIENT_SECRET!,
-    });
+    const basicAuth = Buffer.from(
+      `${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`
+    ).toString("base64");
 
     const res = await fetch("https://accounts.spotify.com/api/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body,
+      headers: {
+        Authorization: `Basic ${basicAuth}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: token.refreshToken ?? "",
+      }),
     });
 
     const refreshed = await res.json();
+
     if (!res.ok) throw refreshed;
 
     return {
@@ -34,46 +35,53 @@ async function refreshSpotifyAccessToken(token: any) {
       accessToken: refreshed.access_token,
       accessTokenExpires: Date.now() + refreshed.expires_in * 1000,
       refreshToken: refreshed.refresh_token ?? token.refreshToken,
+      error: undefined,
     };
-  } catch (err) {
+  } catch {
     return { ...token, error: "RefreshAccessTokenError" };
   }
 }
 
-const handler = NextAuth({
+export const authOptions: NextAuthOptions = {
+  secret: process.env.NEXTAUTH_SECRET,
   providers: [
     SpotifyProvider({
-      clientId: process.env.SPOTIFY_CLIENT_ID!,
-      clientSecret: process.env.SPOTIFY_CLIENT_SECRET!,
-      authorization: {
-        params: {
-          scope: scopes,
-        },
-      },
+      clientId: process.env.SPOTIFY_CLIENT_ID ?? "",
+      clientSecret: process.env.SPOTIFY_CLIENT_SECRET ?? "",
+      authorization:
+        "https://accounts.spotify.com/authorize?scope=user-read-email user-read-private",
     }),
   ],
-  session: { strategy: "jwt" },
   callbacks: {
     async jwt({ token, account }) {
+      const t = token as SpotifyToken;
+
+      // Initial sign in
       if (account) {
-        token.accessToken = account.access_token;
-        token.refreshToken = account.refresh_token;
-        token.accessTokenExpires = (account.expires_at ?? 0) * 1000;
+        return {
+          accessToken: account.access_token,
+          refreshToken: account.refresh_token,
+          accessTokenExpires: typeof account.expires_at === "number" ? account.expires_at * 1000 : 0,
+        } satisfies SpotifyToken;
+      }
+
+      // If still valid, return it
+      if (typeof t.accessTokenExpires === "number" && Date.now() < t.accessTokenExpires) {
         return token;
       }
 
-      if (token.accessTokenExpires && Date.now() < (token.accessTokenExpires as number)) {
-        return token;
-      }
-
-      return refreshSpotifyAccessToken(token);
+      // Otherwise refresh
+      return refreshSpotifyAccessToken(t);
     },
+
     async session({ session, token }) {
-      (session as any).accessToken = token.accessToken;
-      (session as any).error = token.error;
+      const t = token as SpotifyToken;
+      (session as any).accessToken = t.accessToken;
+      (session as any).error = t.error;
       return session;
     },
   },
-});
+};
 
+const handler = NextAuth(authOptions);
 export { handler as GET, handler as POST };
