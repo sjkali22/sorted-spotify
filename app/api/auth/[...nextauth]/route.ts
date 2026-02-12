@@ -1,3 +1,5 @@
+export const runtime = "nodejs";
+
 import NextAuth, { type NextAuthOptions } from "next-auth";
 import SpotifyProvider from "next-auth/providers/spotify";
 
@@ -27,7 +29,6 @@ async function refreshSpotifyAccessToken(token: SpotifyToken): Promise<SpotifyTo
     });
 
     const refreshed = await res.json();
-
     if (!res.ok) throw refreshed;
 
     return {
@@ -44,6 +45,7 @@ async function refreshSpotifyAccessToken(token: SpotifyToken): Promise<SpotifyTo
 
 export const authOptions: NextAuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
+  session: { strategy: "jwt" },
   providers: [
     SpotifyProvider({
       clientId: process.env.SPOTIFY_CLIENT_ID ?? "",
@@ -56,21 +58,19 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, account }) {
       const t = token as SpotifyToken;
 
-      // Initial sign in
       if (account) {
         return {
           accessToken: account.access_token,
           refreshToken: account.refresh_token,
-          accessTokenExpires: typeof account.expires_at === "number" ? account.expires_at * 1000 : 0,
+          accessTokenExpires:
+            typeof account.expires_at === "number" ? account.expires_at * 1000 : 0,
         } satisfies SpotifyToken;
       }
 
-      // If still valid, return it
       if (typeof t.accessTokenExpires === "number" && Date.now() < t.accessTokenExpires) {
         return token;
       }
 
-      // Otherwise refresh
       return refreshSpotifyAccessToken(t);
     },
 
