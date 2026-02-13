@@ -1,12 +1,10 @@
-export const runtime = "nodejs";
-
 import NextAuth, { type NextAuthOptions } from "next-auth";
 import SpotifyProvider from "next-auth/providers/spotify";
 
 type SpotifyToken = {
   accessToken?: string;
   refreshToken?: string;
-  accessTokenExpires?: number; // ms timestamp
+  accessTokenExpires?: number;
   error?: "RefreshAccessTokenError";
 };
 
@@ -45,7 +43,9 @@ async function refreshSpotifyAccessToken(token: SpotifyToken): Promise<SpotifyTo
 
 export const authOptions: NextAuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
-  session: { strategy: "jwt" },
+  pages: {
+    signIn: "/login",
+  },
   providers: [
     SpotifyProvider({
       clientId: process.env.SPOTIFY_CLIENT_ID ?? "",
@@ -79,6 +79,12 @@ export const authOptions: NextAuthOptions = {
       (session as any).accessToken = t.accessToken;
       (session as any).error = t.error;
       return session;
+    },
+
+    async redirect({ url, baseUrl }) {
+      // after login, always land in /home unless already going somewhere else on same site
+      if (url.startsWith(baseUrl)) return url;
+      return `${baseUrl}/home`;
     },
   },
 };
