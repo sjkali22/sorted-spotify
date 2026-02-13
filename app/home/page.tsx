@@ -1,17 +1,19 @@
-import { getServerSession } from "next-auth";
-import { redirect } from "next/navigation";
-import type { Session } from "next-auth";
-import { authOptions } from "../api/auth/[...nextauth]/route";
+import { spotifyFetch } from "@/lib/spotify";
+
+type SpotifyMe = {
+  id: string;
+  display_name: string | null;
+};
 
 export default async function HomePage() {
-  const session = (await getServerSession(authOptions)) as Session | null;
-
-  if (!session) redirect("/login");
+  const me = await spotifyFetch<SpotifyMe>("/v1/me");
 
   return (
-    <main style={{ padding: 24 }}>
-      <h1>Home</h1>
-      <pre style={{ marginTop: 16 }}>{JSON.stringify(session, null, 2)}</pre>
+    <main className="mx-auto max-w-3xl p-6">
+      <h1 className="text-2xl font-semibold">Home</h1>
+      <p className="mt-2 text-sm text-neutral-600">
+        Welcome, {me.display_name ?? me.id}
+      </p>
     </main>
   );
 }

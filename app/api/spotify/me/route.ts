@@ -1,19 +1,21 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "../../auth/[...nextauth]/route";
+import { spotifyFetch } from "@/lib/spotify";
+
+type SpotifyMe = {
+  id: string;
+  display_name: string | null;
+  email?: string;
+  product?: string;
+  images?: { url: string; height: number | null; width: number | null }[];
+};
 
 export async function GET() {
-  const session = await getServerSession(authOptions);
-
-  const accessToken = (session as any)?.accessToken as string | undefined;
-  if (!accessToken) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  try {
+    const me = await spotifyFetch<SpotifyMe>("/v1/me");
+    return NextResponse.json(me);
+  } catch (e: any) {
+    const status = typeof e?.status === "number" ? e.status : 500;
+    const message = e?.message ?? "Internal error";
+    return NextResponse.json({ error: message }, { status });
   }
-
-  const res = await fetch("https://api.spotify.com/v1/me", {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-
-  const data = await res.json();
-  return NextResponse.json(data, { status: res.status });
 }

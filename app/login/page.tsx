@@ -1,27 +1,34 @@
 "use client";
 
-import { signIn } from "next-auth/react";
-import { useSearchParams } from "next/navigation";
+import { signIn, useSession } from "next-auth/react";
+import { useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 export default function LoginPage() {
-  const params = useSearchParams();
-  const error = params.get("error");
+  const { status } = useSession();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    if (status === "authenticated") router.replace("/home");
+  }, [status, router]);
+
+  const callbackUrl = searchParams.get("callbackUrl") || "/home";
+
+  if (status === "loading") return null;
 
   return (
-    <main style={{ padding: 24 }}>
-      <h1>Login</h1>
-
-      {error ? (
-        <p style={{ marginTop: 12, color: "crimson" }}>
-          Login failed ({error}). Try again.
-        </p>
-      ) : null}
+    <main className="mx-auto max-w-xl p-6">
+      <h1 className="text-2xl font-semibold">Login</h1>
+      <p className="mt-2 text-sm text-neutral-600">
+        Sign in with Spotify to continue.
+      </p>
 
       <button
-        style={{ marginTop: 16, padding: "10px 14px", borderRadius: 8 }}
-        onClick={() => signIn("spotify", { callbackUrl: "/home" })}
+        className="mt-6 rounded-md bg-black px-4 py-2 text-white"
+        onClick={() => signIn("spotify", { callbackUrl })}
       >
-        Sign in with Spotify
+        Continue with Spotify
       </button>
     </main>
   );

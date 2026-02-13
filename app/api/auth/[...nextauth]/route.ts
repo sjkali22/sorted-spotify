@@ -8,7 +8,9 @@ type SpotifyToken = {
   error?: "RefreshAccessTokenError";
 };
 
-async function refreshSpotifyAccessToken(token: SpotifyToken): Promise<SpotifyToken> {
+async function refreshSpotifyAccessToken(
+  token: SpotifyToken
+): Promise<SpotifyToken> {
   try {
     const basicAuth = Buffer.from(
       `${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`
@@ -63,11 +65,16 @@ export const authOptions: NextAuthOptions = {
           accessToken: account.access_token,
           refreshToken: account.refresh_token,
           accessTokenExpires:
-            typeof account.expires_at === "number" ? account.expires_at * 1000 : 0,
+            typeof account.expires_at === "number"
+              ? account.expires_at * 1000
+              : 0,
         } satisfies SpotifyToken;
       }
 
-      if (typeof t.accessTokenExpires === "number" && Date.now() < t.accessTokenExpires) {
+      if (
+        typeof t.accessTokenExpires === "number" &&
+        Date.now() < t.accessTokenExpires
+      ) {
         return token;
       }
 
@@ -82,8 +89,13 @@ export const authOptions: NextAuthOptions = {
     },
 
     async redirect({ url, baseUrl }) {
-      // after login, always land in /home unless already going somewhere else on same site
-      if (url.startsWith(baseUrl)) return url;
+      // Allow relative redirects within the app
+      if (url.startsWith("/")) return `${baseUrl}${url}`;
+
+      // Allow redirects that stay on the same origin
+      if (new URL(url).origin === baseUrl) return url;
+
+      // Otherwise, default to /home
       return `${baseUrl}/home`;
     },
   },
