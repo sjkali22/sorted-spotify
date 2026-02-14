@@ -53,7 +53,7 @@ export const authOptions: NextAuthOptions = {
       clientId: process.env.SPOTIFY_CLIENT_ID ?? "",
       clientSecret: process.env.SPOTIFY_CLIENT_SECRET ?? "",
       authorization:
-        "https://accounts.spotify.com/authorize?scope=user-read-email user-read-private",
+        "https://accounts.spotify.com/authorize?scope=user-read-email user-read-private user-top-read user-read-currently-playing user-read-playback-state user-read-recently-played",
     }),
   ],
   callbacks: {
@@ -89,13 +89,8 @@ export const authOptions: NextAuthOptions = {
     },
 
     async redirect({ url, baseUrl }) {
-      // Allow relative redirects within the app
       if (url.startsWith("/")) return `${baseUrl}${url}`;
-
-      // Allow redirects that stay on the same origin
       if (new URL(url).origin === baseUrl) return url;
-
-      // Otherwise, default to /home
       return `${baseUrl}/home`;
     },
   },
