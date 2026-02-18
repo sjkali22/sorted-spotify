@@ -2,8 +2,13 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../auth/[...nextauth]/route";
 
-// GET /api/spotify/playlists
-// Returns ALL playlists (auto-paginates).
+type SpotifyPlaylistsPage = {
+  items?: unknown[];
+  next?: string | null;
+  total?: number;
+  error?: { message?: string };
+};
+
 export async function GET() {
   const session = await getServerSession(authOptions);
   const accessToken = (session as any)?.accessToken as string | undefined;
@@ -12,22 +17,24 @@ export async function GET() {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const pageLimit = 50; // max for /me/playlists
-  let url = `https://api.spotify.com/v1/me/playlists?limit=${pageLimit}&offset=0`;
+  const all: unknown[] = [];
+  const limit = 50;
 
-  const combined: any[] = [];
-  let safetyPages = 0;
+  let url: string | null = `https://api.spotify.com/v1/me/playlists?limit=${limit}&offset=0`;
+  let safety = 0;
 
-  while (true) {
-    safetyPages += 1;
-    if (safetyPages > 50) break; // safety: up to 2500 playlists
+  while (url) {
+    safety += 1;
+    if (safety > 50) break;
 
-    const res = await fetch(url, {
+    const res: Response = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}` },
       cache: "no-store",
     });
 
-    const data = await res.json().catch(() => ({}));
+    const data: SpotifyPlaylistsPage = (await res
+      .json()
+      .catch(() => ({}))) as SpotifyPlaylistsPage;
 
     if (!res.ok) {
       return NextResponse.json(
@@ -36,18 +43,9 @@ export async function GET() {
       );
     }
 
-    combined.push(...(data.items ?? []));
-
-    if (!data.next) {
-      return NextResponse.json({
-        items: combined,
-        total: data.total ?? combined.length,
-      });
-    }
-
-    url = data.next;
+    all.push(...(data.items ?? []));
+    url = data.next ?? null;
   }
 
-  // Fallback if safety cap hit
-  return NextResponse.json({ items: combined, total: combined.length });
+  return NextResponse.json({ items: all, total: all.length });
 }
