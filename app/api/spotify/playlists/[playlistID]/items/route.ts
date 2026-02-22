@@ -26,23 +26,30 @@ function extractIdFromPath(reqUrl: string) {
 
 export async function GET(
   req: Request,
-  context: { params: Promise<{ playlistID: string }> | { playlistID: string } }
+  context: { params: Promise<{ playlistID: string }> }
 ) {
   const session = await getServerSession(authOptions);
-  const accessToken = (session as any)?.accessToken as string | undefined;
 
+  // If token refresh failed, force re-login
+  const sessionError = (session as any)?.error as string | undefined;
+  if (sessionError) {
+    return NextResponse.json(
+      { error: "Auth token refresh failed. Please sign out and sign in again." },
+      { status: 401 }
+    );
+  }
+
+  const accessToken = (session as any)?.accessToken as string | undefined;
   if (!accessToken) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const params = await Promise.resolve(context.params);
-
+  const params = await context.params;
   const rawFromParams = params?.playlistID;
   const rawFromPath = extractIdFromPath(req.url);
   const raw = rawFromParams ?? rawFromPath;
 
   const playlistID = normalizePlaylistId(raw);
-
   if (!playlistID) {
     return NextResponse.json(
       {
@@ -69,7 +76,28 @@ export async function GET(
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    // ✅ return full Spotify error info
+    // 401 = expired token (usually) → your NextAuth refresh should handle it,
+    // but if it didn't, you need to re-login.
+    if (res.status === 401) {
+      return NextResponse.json(
+        { error: "Spotify token expired. Sign out and sign in again.", spotify: data, status: 401 },
+        { status: 401 }
+      );
+    }
+
+    // 403 = scope/access issue (most common)
+    if (res.status === 403) {
+      return NextResponse.json(
+        {
+          error:
+            "Spotify returned 403 Forbidden. This is almost always missing scopes or needing re-consent. Sign out and sign in again (prompt=consent).",
+          spotify: data,
+          status: 403,
+        },
+        { status: 403 }
+      );
+    }
+
     return NextResponse.json(
       { error: data?.error?.message ?? "Spotify request failed", spotify: data, status: res.status },
       { status: res.status }
