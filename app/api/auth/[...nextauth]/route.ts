@@ -8,9 +8,20 @@ type SpotifyToken = {
   error?: "RefreshAccessTokenError";
 };
 
-async function refreshSpotifyAccessToken(
-  token: SpotifyToken
-): Promise<SpotifyToken> {
+const scope = [
+  "user-read-email",
+  "user-read-private",
+  "user-top-read",
+  "user-read-recently-played",
+  "user-read-playback-state",
+  "user-read-currently-playing",
+  "playlist-read-private",
+  "playlist-read-collaborative",
+  "playlist-modify-public",
+  "playlist-modify-private",
+].join(" ");
+
+async function refreshSpotifyAccessToken(token: SpotifyToken): Promise<SpotifyToken> {
   try {
     const basicAuth = Buffer.from(
       `${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`
@@ -45,15 +56,18 @@ async function refreshSpotifyAccessToken(
 
 export const authOptions: NextAuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
-  pages: {
-    signIn: "/login",
-  },
+  pages: { signIn: "/login" },
   providers: [
     SpotifyProvider({
       clientId: process.env.SPOTIFY_CLIENT_ID ?? "",
       clientSecret: process.env.SPOTIFY_CLIENT_SECRET ?? "",
-      authorization:
-        "https://accounts.spotify.com/authorize?scope=user-read-email user-read-private user-top-read user-read-recently-played user-read-playback-state user-read-currently-playing playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private",
+      authorization: {
+        params: {
+          scope,
+          prompt: "consent",
+          show_dialog: "true",
+        },
+      },
     }),
   ],
   callbacks: {
@@ -65,16 +79,11 @@ export const authOptions: NextAuthOptions = {
           accessToken: account.access_token,
           refreshToken: account.refresh_token,
           accessTokenExpires:
-            typeof account.expires_at === "number"
-              ? account.expires_at * 1000
-              : 0,
+            typeof account.expires_at === "number" ? account.expires_at * 1000 : 0,
         } satisfies SpotifyToken;
       }
 
-      if (
-        typeof t.accessTokenExpires === "number" &&
-        Date.now() < t.accessTokenExpires
-      ) {
+      if (typeof t.accessTokenExpires === "number" && Date.now() < t.accessTokenExpires) {
         return token;
       }
 

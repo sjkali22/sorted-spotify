@@ -16,7 +16,6 @@ function normalizePlaylistId(input: string | undefined) {
   return null;
 }
 
-// Fallback: extract playlist id from request URL path
 function extractIdFromPath(reqUrl: string) {
   const { pathname } = new URL(reqUrl);
   const parts = pathname.split("/").filter(Boolean);
@@ -25,7 +24,6 @@ function extractIdFromPath(reqUrl: string) {
   return undefined;
 }
 
-// GET /api/spotify/playlists/:playlistID/items?limit=50&offset=0
 export async function GET(
   req: Request,
   context: { params: Promise<{ playlistID: string }> | { playlistID: string } }
@@ -37,7 +35,6 @@ export async function GET(
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  // ✅ Next.js may provide params as a Promise
   const params = await Promise.resolve(context.params);
 
   const rawFromParams = params?.playlistID;
@@ -60,7 +57,6 @@ export async function GET(
   const limit = searchParams.get("limit") ?? "50";
   const offset = searchParams.get("offset") ?? "0";
 
-  // Use tracks endpoint; returns { items: [...] } with { track: ... }
   const url = `https://api.spotify.com/v1/playlists/${playlistID}/tracks?limit=${encodeURIComponent(
     limit
   )}&offset=${encodeURIComponent(offset)}`;
@@ -73,8 +69,9 @@ export async function GET(
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
+    // ✅ return full Spotify error info
     return NextResponse.json(
-      { error: data?.error?.message ?? "Spotify playlist tracks request failed" },
+      { error: data?.error?.message ?? "Spotify request failed", spotify: data, status: res.status },
       { status: res.status }
     );
   }
