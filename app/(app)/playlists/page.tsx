@@ -1,3 +1,4 @@
+// app/(app)/playlists/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -11,20 +12,24 @@ type Playlist = {
   public: boolean | null;
   owner?: { display_name?: string };
   images?: SpotifyImage[];
-  tracks?: { total?: number };
-  items?: { total?: number };
+  tracks?: { total?: number }; // legacy
+  items?: { total?: number }; // Feb 2026 rename
 };
 
 type PlaylistItem = {
   added_at?: string;
-  track?: {
+
+  // Feb 2026 rename: items.items[].item
+  item?: {
     id?: string;
     name?: string;
     external_urls?: { spotify?: string };
     album?: { name?: string; images?: SpotifyImage[] };
     artists?: { name?: string }[];
   };
-  item?: {
+
+  // legacy: tracks.items[].track
+  track?: {
     id?: string;
     name?: string;
     external_urls?: { spotify?: string };
@@ -87,11 +92,8 @@ export default function PlaylistsPage() {
         if (!isValidPlaylistId(selectedId) && list.length > 0) {
           const first = list[0];
           if (isValidPlaylistId(first?.id)) {
-            console.log("[ui] default select playlist id =", first.id, "name =", first.name);
             setSelectedId(first.id);
             setSelected(first);
-          } else {
-            console.warn("[ui] first playlist missing id:", first);
           }
         }
       } catch (e: any) {
@@ -138,16 +140,20 @@ export default function PlaylistsPage() {
           selectedId
         )}/items?limit=${limit}&offset=${offset}`;
 
-        console.log("[ui] fetching items:", url);
-
         const res = await fetch(url, { cache: "no-store" });
         const data = await res.json();
 
         if (!res.ok) throw new Error(data?.error ?? "Failed to load tracks");
 
-        const list: PlaylistItem[] = data?.items ?? [];
-        if (cancelled) return;
+        // ✅ Handle both shapes:
+        // - New: { items: { items: [...] } }
+        // - Old: { items: [...] }
+        const list: PlaylistItem[] =
+          (data?.items?.items as PlaylistItem[] | undefined) ??
+          (data?.items as PlaylistItem[] | undefined) ??
+          [];
 
+        if (cancelled) return;
         setItems(list);
       } catch (e: any) {
         if (cancelled) return;
@@ -170,7 +176,7 @@ export default function PlaylistsPage() {
     if (!q) return items;
 
     return items.filter((it) => {
-      const t = it.track ?? it.item;
+      const t = it.item ?? it.track; // ✅ prefer new name
       const name = t?.name ?? "";
       const artist = t?.artists?.map((a) => a.name).join(", ") ?? "";
       const album = t?.album?.name ?? "";
@@ -213,13 +219,7 @@ export default function PlaylistsPage() {
         }}
       >
         {/* LEFT: playlist list */}
-        <section
-          style={{
-            border: "1px solid #ddd",
-            borderRadius: 10,
-            padding: 12,
-          }}
-        >
+        <section style={{ border: "1px solid #ddd", borderRadius: 10, padding: 12 }}>
           <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Your playlists</h2>
 
           {loadingPlaylists ? (
@@ -238,13 +238,7 @@ export default function PlaylistsPage() {
                     key={p.id}
                     onClick={() => {
                       const id = p?.id;
-                      console.log("[ui] clicked playlist id =", id, "name =", p?.name);
-
-                      if (!isValidPlaylistId(id)) {
-                        console.warn("[ui] refusing invalid playlist id:", id, p);
-                        return;
-                      }
-
+                      if (!isValidPlaylistId(id)) return;
                       setSelectedId(id);
                       setSelected(p);
                     }}
@@ -270,14 +264,7 @@ export default function PlaylistsPage() {
                         style={{ borderRadius: 6, objectFit: "cover" }}
                       />
                     ) : (
-                      <div
-                        style={{
-                          width: 42,
-                          height: 42,
-                          borderRadius: 6,
-                          background: "#eee",
-                        }}
-                      />
+                      <div style={{ width: 42, height: 42, borderRadius: 6, background: "#eee" }} />
                     )}
 
                     <div style={{ minWidth: 0 }}>
@@ -301,14 +288,7 @@ export default function PlaylistsPage() {
         </section>
 
         {/* RIGHT: selected playlist + tracks */}
-        <section
-          style={{
-            border: "1px solid #ddd",
-            borderRadius: 10,
-            padding: 12,
-            minHeight: 420,
-          }}
-        >
+        <section style={{ border: "1px solid #ddd", borderRadius: 10, padding: 12, minHeight: 420 }}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <div>
               <div style={{ fontSize: 13, fontWeight: 700 }}>Playlist selected</div>
@@ -393,7 +373,7 @@ export default function PlaylistsPage() {
               <p style={{ padding: "12px 0" }}>No tracks found on this page.</p>
             ) : (
               filtered.map((it, idx) => {
-                const t = it.track ?? it.item;
+                const t = it.item ?? it.track; // ✅ prefer new name
                 const img = getImageUrl(t?.album?.images);
                 const artist = t?.artists?.map((a) => a.name).join(", ") ?? "";
                 const openUrl = t?.external_urls?.spotify ?? "";
@@ -420,21 +400,22 @@ export default function PlaylistsPage() {
                           style={{ borderRadius: 8, objectFit: "cover" }}
                         />
                       ) : (
-                        <div
-                          style={{
-                            width: 46,
-                            height: 46,
-                            borderRadius: 8,
-                            background: "#eee",
-                          }}
-                        />
+                        <div style={{ width: 46, height: 46, borderRadius: 8, background: "#eee" }} />
                       )}
                     </div>
                     <div style={{ fontWeight: 700 }}>{t?.name ?? "—"}</div>
                     <div>{artist}</div>
                     <div>{t?.album?.name ?? "—"}</div>
                     <div style={{ fontSize: 12, opacity: 0.8 }}>{formatAddedAt(it.added_at)}</div>
-                    <div>{openUrl ? <a href={openUrl} target="_blank" rel="noreferrer">Open</a> : "—"}</div>
+                    <div>
+                      {openUrl ? (
+                        <a href={openUrl} target="_blank" rel="noreferrer">
+                          Open
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </div>
                   </div>
                 );
               })
@@ -443,8 +424,7 @@ export default function PlaylistsPage() {
             <div style={{ fontSize: 12, opacity: 0.75, marginTop: 10 }}>
               {filtered.length > 0 ? (
                 <>
-                  Showing {offset + 1}–{offset + filtered.length} of{" "}
-                  {selectedTotalTracks || "?"}
+                  Showing {offset + 1}–{offset + filtered.length} of {selectedTotalTracks || "?"}
                 </>
               ) : (
                 <>Showing 0 of {selectedTotalTracks || "?"}</>
