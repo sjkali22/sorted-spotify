@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  --accent: #3b82f6; /* blue */
+  --background: #18181b;   /* zinc-900 */
+  --foreground: #f4f4f5;   /* zinc-100 */
+  --accent: #3b82f6;
   --accent-foreground: #ffffff;
 }
 
@@ -14,20 +14,12 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* optional helpers you can use in components */
 a.active,
 .nav-active {
   color: var(--accent);
