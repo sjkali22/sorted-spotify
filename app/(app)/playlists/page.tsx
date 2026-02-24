@@ -1,437 +1,602 @@
 // app/(app)/playlists/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type SpotifyImage = { url: string; width?: number; height?: number };
 
 type Playlist = {
   id: string;
   name: string;
-  public: boolean | null;
-  owner?: { display_name?: string };
   images?: SpotifyImage[];
+  owner?: { display_name?: string; id?: string };
+  public?: boolean;
+  collaborative?: boolean;
+  description?: string;
   tracks?: { total?: number }; // legacy
-  items?: { total?: number }; // Feb 2026 rename
+  items?: { total?: number }; // possible rename
 };
 
 type PlaylistItem = {
-  added_at?: string;
-
-  // Feb 2026 rename: items.items[].item
-  item?: {
-    id?: string;
-    name?: string;
-    external_urls?: { spotify?: string };
-    album?: { name?: string; images?: SpotifyImage[] };
-    artists?: { name?: string }[];
-  };
-
-  // legacy: tracks.items[].track
-  track?: {
-    id?: string;
-    name?: string;
-    external_urls?: { spotify?: string };
-    album?: { name?: string; images?: SpotifyImage[] };
-    artists?: { name?: string }[];
-  };
+  added_at?: string | null;
+  item?: any;
+  track?: any;
 };
 
-function getImageUrl(images?: SpotifyImage[]) {
+type SortMode = "default" | "name_asc" | "name_desc";
+
+function pickImage(images?: SpotifyImage[]) {
   return images?.[0]?.url ?? "";
 }
 
-function formatAddedAt(iso?: string) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString();
+function formatArtist(media: any) {
+  const artists = media?.artists;
+  if (Array.isArray(artists) && artists.length) {
+    return artists.map((a: any) => a?.name).filter(Boolean).join(", ");
+  }
+  return "—";
 }
 
-function isValidPlaylistId(id: unknown): id is string {
-  return typeof id === "string" && id.length > 0 && id !== "undefined";
+function PrivacyBadge({ value }: { value: boolean | undefined }) {
+  const common =
+    "absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-md bg-black/55 text-white ring-1 ring-white/10";
+
+  if (value === true) {
+    return (
+      <span className={common} title="Public">
+        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Z" />
+          <path d="M2 12h20" />
+          <path d="M12 2a15 15 0 0 1 0 20" />
+          <path d="M12 2a15 15 0 0 0 0 20" />
+        </svg>
+      </span>
+    );
+  }
+
+  if (value === false) {
+    return (
+      <span className={common} title="Private">
+        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          <path d="M6 11h12v10H6z" />
+        </svg>
+      </span>
+    );
+  }
+
+  return (
+    <span className={common} title="Unknown">
+      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M12 18h.01" />
+        <path d="M9.09 9a3 3 0 1 1 5.82 1c0 2-3 2-3 4" />
+        <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Z" />
+      </svg>
+    </span>
+  );
 }
 
 export default function PlaylistsPage() {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [loadingPlaylists, setLoadingPlaylists] = useState(true);
-  const [playlistsError, setPlaylistsError] = useState<string | null>(null);
+  const [playlistsError, setPlaylistsError] = useState<string>("");
+
+  const [playlistSearch, setPlaylistSearch] = useState("");
+
+  const [sortMode, setSortMode] = useState<SortMode>("default");
+  const [sortOpen, setSortOpen] = useState(false);
+  const [sortDraft, setSortDraft] = useState<SortMode>("default");
 
   const [selectedId, setSelectedId] = useState<string>("");
-  const [selected, setSelected] = useState<Playlist | null>(null);
+  const selected = useMemo(
+    () => playlists.find((p) => p.id === selectedId) ?? null,
+    [playlists, selectedId]
+  );
 
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerTab, setDrawerTab] = useState<"tools" | "items">("tools");
+
+  // Items infinite scroll state
+  const LIMIT = 50;
   const [items, setItems] = useState<PlaylistItem[]>([]);
+  const [itemsTotal, setItemsTotal] = useState<number | null>(null);
+  const [itemsOffset, setItemsOffset] = useState(0);
   const [itemsLoading, setItemsLoading] = useState(false);
-  const [itemsError, setItemsError] = useState<string | null>(null);
+  const [itemsError, setItemsError] = useState<string>("");
 
   const [query, setQuery] = useState("");
-  const [offset, setOffset] = useState(0);
-  const limit = 50;
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  // 1) Load playlists
+  async function loadPlaylists() {
+    setLoadingPlaylists(true);
+    setPlaylistsError("");
+
+    try {
+      const r = await fetch("/api/spotify/playlists", { cache: "no-store" });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error ?? "Failed to load playlists");
+
+      const list = Array.isArray(data?.items) ? data.items : [];
+      setPlaylists(list);
+
+      if (selectedId && !list.some((p: Playlist) => p.id === selectedId)) {
+        setSelectedId("");
+        setDrawerOpen(false);
+      }
+    } catch (e: any) {
+      setPlaylistsError(e?.message ?? "Failed to load playlists");
+    } finally {
+      setLoadingPlaylists(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
-
-    async function run() {
-      setLoadingPlaylists(true);
-      setPlaylistsError(null);
-
-      try {
-        const res = await fetch("/api/spotify/playlists", { cache: "no-store" });
-        const data = await res.json();
-
-        if (!res.ok) throw new Error(data?.error ?? "Failed to load playlists");
-
-        const list: Playlist[] = data?.items ?? [];
-        if (cancelled) return;
-
-        setPlaylists(list);
-
-        // Select first playlist by default
-        if (!isValidPlaylistId(selectedId) && list.length > 0) {
-          const first = list[0];
-          if (isValidPlaylistId(first?.id)) {
-            setSelectedId(first.id);
-            setSelected(first);
-          }
-        }
-      } catch (e: any) {
-        if (cancelled) return;
-        setPlaylistsError(e?.message ?? "Failed to load playlists");
-      } finally {
-        if (!cancelled) setLoadingPlaylists(false);
-      }
-    }
-
-    run();
+    (async () => {
+      if (cancelled) return;
+      await loadPlaylists();
+    })();
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 2) When selectedId changes, reset paging/search
   useEffect(() => {
-    if (!isValidPlaylistId(selectedId)) return;
-    setOffset(0);
+    if (!selectedId) return;
+    setDrawerOpen(true);
+    setDrawerTab("tools");
+  }, [selectedId]);
+
+  useEffect(() => {
+    setItems([]);
+    setItemsTotal(null);
+    setItemsOffset(0);
+    setItemsLoading(false);
+    setItemsError("");
     setQuery("");
   }, [selectedId]);
 
-  // Keep `selected` in sync if playlists reload
-  useEffect(() => {
-    if (!isValidPlaylistId(selectedId)) return;
-    const found = playlists.find((p) => p.id === selectedId) ?? null;
-    if (found) setSelected(found);
-  }, [playlists, selectedId]);
+  const canLoadMore = useMemo(() => {
+    if (itemsLoading) return false;
+    if (itemsTotal === null) return true;
+    return items.length < itemsTotal;
+  }, [itemsLoading, itemsTotal, items.length]);
 
-  // 3) Fetch items for selected playlist
-  useEffect(() => {
-    let cancelled = false;
+  async function loadNextPage() {
+    if (!selectedId) return;
+    if (!canLoadMore) return;
 
-    async function run() {
-      if (!isValidPlaylistId(selectedId)) return;
+    setItemsLoading(true);
+    setItemsError("");
 
-      setItemsLoading(true);
-      setItemsError(null);
+    try {
+      const r = await fetch(
+        `/api/spotify/playlists/${encodeURIComponent(selectedId)}/items?limit=${LIMIT}&offset=${itemsOffset}`,
+        { cache: "no-store" }
+      );
 
-      try {
-        const url = `/api/spotify/playlists/${encodeURIComponent(
-          selectedId
-        )}/items?limit=${limit}&offset=${offset}`;
+      const data = await r.json();
 
-        const res = await fetch(url, { cache: "no-store" });
-        const data = await res.json();
-
-        if (!res.ok) throw new Error(data?.error ?? "Failed to load tracks");
-
-        // ✅ Handle both shapes:
-        // - New: { items: { items: [...] } }
-        // - Old: { items: [...] }
-        const list: PlaylistItem[] =
-          (data?.items?.items as PlaylistItem[] | undefined) ??
-          (data?.items as PlaylistItem[] | undefined) ??
-          [];
-
-        if (cancelled) return;
-        setItems(list);
-      } catch (e: any) {
-        if (cancelled) return;
-        setItems([]);
-        setItemsError(e?.message ?? "Failed to load tracks");
-      } finally {
-        if (!cancelled) setItemsLoading(false);
+      if (!r.ok) {
+        throw new Error(
+          data?.error?.message ||
+            data?.error ||
+            "Playlist items unavailable (Spotify restrictions)."
+        );
       }
+
+      const pageItems: PlaylistItem[] = Array.isArray(data?.items) ? data.items : [];
+      const total: number = typeof data?.total === "number" ? data.total : itemsTotal ?? pageItems.length;
+
+      setItemsTotal(total);
+      setItems((prev) => {
+        const seen = new Set(
+          prev.map((x: any) => `${x?.item?.id ?? x?.track?.id ?? "x"}|${x?.added_at ?? ""}`)
+        );
+
+        const merged = [...prev];
+        for (const it of pageItems) {
+          const media = it.item ?? it.track ?? null;
+          const key = `${media?.id ?? "x"}|${it?.added_at ?? ""}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            merged.push(it);
+          }
+        }
+        return merged;
+      });
+
+      setItemsOffset((o) => o + LIMIT);
+    } catch (e: any) {
+      setItemsError(e?.message ?? "Failed to load items");
+    } finally {
+      setItemsLoading(false);
     }
+  }
 
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedId, offset]);
+  useEffect(() => {
+    if (drawerTab !== "items") return;
+    if (!selectedId) return;
+    if (items.length === 0 && !itemsLoading && !itemsError) loadNextPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawerTab, selectedId]);
 
-  // Filter current page client-side
-  const filtered = useMemo(() => {
+  useEffect(() => {
+    if (drawerTab !== "items") return;
+    if (!sentinelRef.current) return;
+
+    const el = sentinelRef.current;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        const first = entries[0];
+        if (first?.isIntersecting) loadNextPage();
+      },
+      { root: null, rootMargin: "200px", threshold: 0 }
+    );
+
+    obs.observe(el);
+    return () => obs.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawerTab, canLoadMore, itemsOffset, selectedId]);
+
+  const filteredItems = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return items;
 
     return items.filter((it) => {
-      const t = it.item ?? it.track; // ✅ prefer new name
-      const name = t?.name ?? "";
-      const artist = t?.artists?.map((a) => a.name).join(", ") ?? "";
-      const album = t?.album?.name ?? "";
-      return (
-        name.toLowerCase().includes(q) ||
-        artist.toLowerCase().includes(q) ||
-        album.toLowerCase().includes(q)
-      );
+      const media = it.item ?? it.track ?? null;
+      const name = String(media?.name ?? "").toLowerCase();
+      const artists = String(formatArtist(media)).toLowerCase();
+      const album = String(media?.album?.name ?? "").toLowerCase();
+      return name.includes(q) || artists.includes(q) || album.includes(q);
     });
   }, [items, query]);
 
-  const selectedTotalTracks = selected?.items?.total ?? selected?.tracks?.total ?? 0;
+  const filteredPlaylists = useMemo(() => {
+    const q = playlistSearch.trim().toLowerCase();
+    let list = q
+      ? playlists.filter((p) => {
+          const name = String(p.name ?? "").toLowerCase();
+          const owner = String(p.owner?.display_name ?? "").toLowerCase();
+          return name.includes(q) || owner.includes(q);
+        })
+      : playlists;
+
+    if (sortMode === "name_asc") {
+      list = [...list].sort((a, b) =>
+        String(a.name ?? "").localeCompare(String(b.name ?? ""), undefined, { sensitivity: "base" })
+      );
+    } else if (sortMode === "name_desc") {
+      list = [...list].sort((a, b) =>
+        String(b.name ?? "").localeCompare(String(a.name ?? ""), undefined, { sensitivity: "base" })
+      );
+    }
+
+    return list;
+  }, [playlists, playlistSearch, sortMode]);
+
+  const sortBadge = useMemo(() => (sortMode === "default" ? 0 : 1), [sortMode]);
+
+  function openSort() {
+    setSortDraft(sortMode);
+    setSortOpen(true);
+  }
+
+  function closeSort() {
+    setSortOpen(false);
+  }
+
+  function applySort() {
+    setSortMode(sortDraft);
+    setSortOpen(false);
+  }
 
   return (
-    <main style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700 }}>Playlists</h1>
+    <main className="min-h-[calc(100vh-56px)] bg-zinc-900 text-zinc-100">
+      <div className="mx-auto max-w-6xl px-6 py-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold">Playlists</h1>
 
-        <div style={{ display: "flex", gap: 8 }}>
-          <button style={{ padding: "8px 12px" }} disabled>
-            Shuffle
-          </button>
-          <button style={{ padding: "8px 12px" }} disabled>
-            Dedupe
-          </button>
-          <button style={{ padding: "8px 12px" }} disabled>
-            Remove unavailable
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={openSort}
+              className="relative rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm hover:bg-zinc-800/40"
+              title="Sort playlists"
+            >
+              Sort
+              {sortBadge > 0 ? (
+                <span className="ml-2 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-amber-400 px-2 text-xs font-semibold text-black">
+                  {sortBadge}
+                </span>
+              ) : null}
+            </button>
+
+            <button
+              onClick={loadPlaylists}
+              className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm hover:bg-zinc-800/40 disabled:opacity-50"
+              disabled={loadingPlaylists}
+              title="Refresh playlists"
+            >
+              {loadingPlaylists ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
         </div>
+
+        {playlistsError ? <p className="mt-3 text-sm text-red-300">{playlistsError}</p> : null}
+
+        <div className="mt-4">
+          <input
+            value={playlistSearch}
+            onChange={(e) => setPlaylistSearch(e.target.value)}
+            placeholder="Search playlists…"
+            className="w-full max-w-md rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm outline-none"
+          />
+        </div>
+
+        {loadingPlaylists ? (
+          <p className="mt-6 text-sm text-zinc-400">Loading…</p>
+        ) : filteredPlaylists.length === 0 ? (
+          <p className="mt-6 text-sm text-zinc-400">No playlists found.</p>
+        ) : (
+          <div
+            className="
+              mt-6 grid grid-cols-2 gap-4
+              sm:grid-cols-3
+              md:grid-cols-4
+              lg:grid-cols-5
+            "
+          >
+            {filteredPlaylists.map((p) => {
+              const cover = pickImage(p.images);
+              const active = p.id === selectedId;
+
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => setSelectedId(p.id)}
+                  className={`group relative overflow-hidden rounded-xl border text-left ${
+                    active ? "border-zinc-600" : "border-zinc-800"
+                  } bg-zinc-950/30 hover:bg-zinc-800/20`}
+                >
+                  <div className="relative aspect-square w-full bg-zinc-800">
+                    {cover ? <Image src={cover} alt="" fill className="object-cover" /> : null}
+                    <PrivacyBadge value={p.public} />
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-3">
+                      <div className="truncate text-sm font-semibold">{p.name}</div>
+                      <div className="mt-1 truncate text-xs text-zinc-300">
+                        {p.owner?.display_name ? `By ${p.owner.display_name}` : " "}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {playlistsError && <p style={{ color: "red", marginTop: 8 }}>{playlistsError}</p>}
+      {/* Sort modal (ONLY sort options) */}
+      {sortOpen ? (
+        <div className="fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-black/50" onClick={closeSort} />
+          <div className="absolute left-1/2 top-1/2 w-[min(720px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
+            <div className="text-2xl font-semibold">Sort your playlists</div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1.2fr",
-          gap: 16,
-          marginTop: 16,
-        }}
-      >
-        {/* LEFT: playlist list */}
-        <section style={{ border: "1px solid #ddd", borderRadius: 10, padding: 12 }}>
-          <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Your playlists</h2>
+            <div className="mt-6">
+              <div className="text-sm font-semibold text-zinc-200">Sort by:</div>
 
-          {loadingPlaylists ? (
-            <p>Loading playlists…</p>
-          ) : playlists.length === 0 ? (
-            <p>No playlists found.</p>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {playlists.map((p) => {
-                const active = p.id === selectedId;
-                const img = getImageUrl(p.images);
-                const total = p.items?.total ?? p.tracks?.total ?? 0;
+              <div className="mt-3 space-y-3 text-sm">
+                <label className="flex items-center gap-3">
+                  <input
+                    type="radio"
+                    name="sort"
+                    checked={sortDraft === "default"}
+                    onChange={() => setSortDraft("default")}
+                  />
+                  Default (custom order)
+                </label>
 
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => {
-                      const id = p?.id;
-                      if (!isValidPlaylistId(id)) return;
-                      setSelectedId(id);
-                      setSelected(p);
-                    }}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      textAlign: "left",
-                      padding: 10,
-                      borderRadius: 10,
-                      border: "1px solid #ccc",
-                      background: active ? "#111" : "#fff",
-                      color: active ? "#fff" : "#111",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {img ? (
-                      <Image
-                        src={img}
-                        alt=""
-                        width={42}
-                        height={42}
-                        style={{ borderRadius: 6, objectFit: "cover" }}
-                      />
-                    ) : (
-                      <div style={{ width: 42, height: 42, borderRadius: 6, background: "#eee" }} />
-                    )}
+                <label className="flex items-center gap-3">
+                  <input
+                    type="radio"
+                    name="sort"
+                    checked={sortDraft === "name_asc"}
+                    onChange={() => setSortDraft("name_asc")}
+                  />
+                  Playlist name (A → Z)
+                </label>
 
-                    <div style={{ minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontWeight: 700,
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        {p.name}
-                      </div>
-                      <div style={{ fontSize: 12, opacity: 0.8 }}>Tracks: {total}</div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </section>
-
-        {/* RIGHT: selected playlist + tracks */}
-        <section style={{ border: "1px solid #ddd", borderRadius: 10, padding: 12, minHeight: 420 }}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700 }}>Playlist selected</div>
-              <div style={{ fontSize: 20, fontWeight: 800 }}>{selected?.name ?? "—"}</div>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>
-                By: {selected?.owner?.display_name ?? "—"} ·{" "}
-                {selected?.public ? "Public" : "Private"} · Total tracks: {selectedTotalTracks}
+                <label className="flex items-center gap-3">
+                  <input
+                    type="radio"
+                    name="sort"
+                    checked={sortDraft === "name_desc"}
+                    onChange={() => setSortDraft("name_desc")}
+                  />
+                  Playlist name (Z → A)
+                </label>
               </div>
             </div>
 
-            {isValidPlaylistId(selected?.id) ? (
+            <div className="mt-8 flex justify-end gap-3">
+              <button
+                onClick={() => setSortDraft("default")}
+                className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-4 py-2 text-sm hover:bg-zinc-800/40"
+              >
+                Reset
+              </button>
+
+              <button
+                onClick={closeSort}
+                className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-4 py-2 text-sm hover:bg-zinc-800/40"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={applySort}
+                className="rounded-lg bg-zinc-200 px-4 py-2 text-sm font-semibold text-black hover:bg-white"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Drawer overlay */}
+      <div className={`fixed inset-0 z-40 ${drawerOpen ? "" : "pointer-events-none"}`} aria-hidden={!drawerOpen}>
+        <div
+          className={`absolute inset-0 bg-black/40 transition-opacity ${drawerOpen ? "opacity-100" : "opacity-0"}`}
+          onClick={() => setDrawerOpen(false)}
+        />
+
+        <aside
+          className={`absolute right-0 top-0 h-full w-full max-w-md transform border-l border-zinc-800 bg-zinc-950 text-zinc-100 shadow-xl transition-transform ${
+            drawerOpen ? "translate-x-0" : "translate-x-full"
+          }`}
+        >
+          <div className="flex items-center justify-between border-b border-zinc-800 p-4">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold">{selected?.name ?? "Playlist"}</div>
+              <div className="truncate text-xs text-zinc-400">
+                {selected?.owner?.display_name ? `Made by ${selected.owner.display_name}` : " "}
+              </div>
+            </div>
+
+            <button
+              className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-xs hover:bg-zinc-800/40"
+              onClick={() => setDrawerOpen(false)}
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="flex gap-2 border-b border-zinc-800 p-3">
+            <button
+              onClick={() => setDrawerTab("tools")}
+              className={`flex-1 rounded-lg px-3 py-2 text-sm ${
+                drawerTab === "tools"
+                  ? "bg-zinc-700"
+                  : "border border-zinc-800 bg-zinc-900/30 hover:bg-zinc-800/40"
+              }`}
+            >
+              Tools
+            </button>
+            <button
+              onClick={() => setDrawerTab("items")}
+              className={`flex-1 rounded-lg px-3 py-2 text-sm ${
+                drawerTab === "items"
+                  ? "bg-zinc-700"
+                  : "border border-zinc-800 bg-zinc-900/30 hover:bg-zinc-800/40"
+              }`}
+            >
+              List items
+            </button>
+          </div>
+
+          {drawerTab === "tools" ? (
+            <div className="p-4">
+              <div className="text-xs font-semibold text-zinc-400">CREATION TOOLS</div>
+              <div className="mt-2 space-y-2 text-sm">
+                <button className="w-full rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-left hover:bg-zinc-800/40">
+                  Create similar (placeholder)
+                </button>
+                <button className="w-full rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-left hover:bg-zinc-800/40">
+                  Filtered by genre (placeholder)
+                </button>
+                <button className="w-full rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-left hover:bg-zinc-800/40">
+                  Dedupe (placeholder)
+                </button>
+                <button className="w-full rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-left hover:bg-zinc-800/40">
+                  Shuffle (placeholder)
+                </button>
+              </div>
+
+              <div className="mt-6 text-xs font-semibold text-zinc-400">OPEN</div>
               <a
-                href={`https://open.spotify.com/playlist/${selected.id}`}
+                className="mt-2 block rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm hover:bg-zinc-800/40"
+                href={selected ? `https://open.spotify.com/playlist/${selected.id}` : "#"}
                 target="_blank"
                 rel="noreferrer"
-                style={{
-                  alignSelf: "start",
-                  padding: "8px 12px",
-                  border: "1px solid #ccc",
-                  borderRadius: 8,
-                  textDecoration: "none",
-                }}
               >
-                Open in Spotify
+                Open on Spotify
               </a>
-            ) : null}
-          </div>
-
-          {itemsError && <p style={{ color: "red", marginTop: 10 }}>{itemsError}</p>}
-
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search tracks in this page…"
-              style={{
-                flex: 1,
-                padding: "10px 12px",
-                borderRadius: 8,
-                border: "1px solid #ccc",
-              }}
-            />
-            <button
-              onClick={() => setOffset((o) => Math.max(0, o - limit))}
-              disabled={offset === 0 || itemsLoading}
-              style={{ padding: "8px 12px" }}
-            >
-              Prev
-            </button>
-            <button
-              onClick={() => setOffset((o) => o + limit)}
-              disabled={itemsLoading || items.length < limit}
-              style={{ padding: "8px 12px" }}
-            >
-              Next
-            </button>
-          </div>
-
-          <div style={{ marginTop: 14 }}>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "70px 2fr 1.5fr 1.5fr 140px 60px",
-                gap: 10,
-                fontSize: 12,
-                fontWeight: 700,
-                padding: "10px 0",
-                borderBottom: "1px solid #eee",
-              }}
-            >
-              <div>Artwork</div>
-              <div>Track</div>
-              <div>Artist</div>
-              <div>Album</div>
-              <div>Added</div>
-              <div>Open</div>
             </div>
-
-            {itemsLoading ? (
-              <p style={{ padding: "12px 0" }}>Loading tracks…</p>
-            ) : filtered.length === 0 ? (
-              <p style={{ padding: "12px 0" }}>No tracks found on this page.</p>
-            ) : (
-              filtered.map((it, idx) => {
-                const t = it.item ?? it.track; // ✅ prefer new name
-                const img = getImageUrl(t?.album?.images);
-                const artist = t?.artists?.map((a) => a.name).join(", ") ?? "";
-                const openUrl = t?.external_urls?.spotify ?? "";
-                return (
-                  <div
-                    key={`${t?.id ?? "x"}-${idx}`}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "70px 2fr 1.5fr 1.5fr 140px 60px",
-                      gap: 10,
-                      alignItems: "center",
-                      padding: "10px 0",
-                      borderBottom: "1px solid #f2f2f2",
-                      fontSize: 13,
+          ) : (
+            <div className="flex h-[calc(100%-112px)] flex-col">
+              <div className="border-b border-zinc-800 p-3">
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search items…"
+                  className="w-full rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm outline-none"
+                />
+                <div className="mt-2 flex items-center justify-between text-xs text-zinc-400">
+                  <span>
+                    Loaded: {items.length}
+                    {itemsTotal !== null ? ` / ${itemsTotal}` : ""}
+                  </span>
+                  <button
+                    className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-2 py-1 hover:bg-zinc-800/40"
+                    onClick={() => {
+                      setItems([]);
+                      setItemsTotal(null);
+                      setItemsOffset(0);
+                      setItemsError("");
+                      setTimeout(() => loadNextPage(), 0);
                     }}
                   >
-                    <div>
-                      {img ? (
-                        <Image
-                          src={img}
-                          alt=""
-                          width={46}
-                          height={46}
-                          style={{ borderRadius: 8, objectFit: "cover" }}
-                        />
-                      ) : (
-                        <div style={{ width: 46, height: 46, borderRadius: 8, background: "#eee" }} />
-                      )}
-                    </div>
-                    <div style={{ fontWeight: 700 }}>{t?.name ?? "—"}</div>
-                    <div>{artist}</div>
-                    <div>{t?.album?.name ?? "—"}</div>
-                    <div style={{ fontSize: 12, opacity: 0.8 }}>{formatAddedAt(it.added_at)}</div>
-                    <div>
-                      {openUrl ? (
-                        <a href={openUrl} target="_blank" rel="noreferrer">
-                          Open
-                        </a>
-                      ) : (
-                        "—"
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            )}
+                    Refresh
+                  </button>
+                </div>
 
-            <div style={{ fontSize: 12, opacity: 0.75, marginTop: 10 }}>
-              {filtered.length > 0 ? (
-                <>
-                  Showing {offset + 1}–{offset + filtered.length} of {selectedTotalTracks || "?"}
-                </>
-              ) : (
-                <>Showing 0 of {selectedTotalTracks || "?"}</>
-              )}
+                {itemsError ? (
+                  <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/30 p-2 text-xs text-zinc-300">
+                    {itemsError}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-3">
+                {filteredItems.map((it, idx) => {
+                  const media = it.item ?? it.track ?? null;
+                  const name = media?.name ?? "—";
+                  const artists = formatArtist(media);
+                  const album = media?.album?.name ?? "—";
+                  const img = pickImage(media?.album?.images);
+
+                  return (
+                    <div
+                      key={`${media?.id ?? "x"}-${it?.added_at ?? idx}-${idx}`}
+                      className="mb-2 flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/20 p-3"
+                    >
+                      <div className="relative h-10 w-10 overflow-hidden rounded-md bg-zinc-800">
+                        {img ? <Image src={img} alt="" fill className="object-cover" /> : null}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold">{name}</div>
+                        <div className="truncate text-xs text-zinc-400">
+                          {artists} · {album}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {itemsLoading ? <p className="mt-2 text-xs text-zinc-400">Loading…</p> : null}
+
+                <div ref={sentinelRef} className="h-10" />
+
+                {!itemsLoading && itemsTotal !== null && items.length >= itemsTotal ? (
+                  <p className="mt-2 text-xs text-zinc-500">All items loaded.</p>
+                ) : null}
+              </div>
             </div>
-          </div>
-        </section>
+          )}
+        </aside>
       </div>
     </main>
   );
