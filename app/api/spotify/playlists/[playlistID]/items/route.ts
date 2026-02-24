@@ -17,10 +17,12 @@ function normalizePlaylistId(input: string | undefined) {
   return null;
 }
 
-export async function GET(req: Request, context: { params: { playlistID: string } }) {
+export async function GET(
+  req: Request,
+  context: { params: Promise<{ playlistID: string }> } // ✅ Next.js 16: params is a Promise
+) {
   const session = await getServerSession(authOptions);
 
-  // If token refresh failed, force re-login
   const sessionError = (session as any)?.error as string | undefined;
   if (sessionError) {
     return NextResponse.json(
@@ -34,7 +36,7 @@ export async function GET(req: Request, context: { params: { playlistID: string 
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const rawFromParams = context.params?.playlistID;
+  const { playlistID: rawFromParams } = await context.params; // ✅ await the Promise
   const playlistID = normalizePlaylistId(rawFromParams);
 
   if (!playlistID) {
@@ -48,7 +50,6 @@ export async function GET(req: Request, context: { params: { playlistID: string 
   const limit = searchParams.get("limit") ?? "50";
   const offset = searchParams.get("offset") ?? "0";
 
-  // ✅ Feb 2026 change: /tracks -> /items
   const url = `https://api.spotify.com/v1/playlists/${playlistID}/items?limit=${encodeURIComponent(
     limit
   )}&offset=${encodeURIComponent(offset)}`;
@@ -63,7 +64,7 @@ export async function GET(req: Request, context: { params: { playlistID: string 
   if (!res.ok) {
     if (res.status === 401) {
       return NextResponse.json(
-        { error: "Spotify token expired. Sign out and sign in again.", spotify: data, status: 401 },
+        { error: "Spotify token expired. Sign out and sign in again.", spotify: data },
         { status: 401 }
       );
     }
@@ -74,14 +75,13 @@ export async function GET(req: Request, context: { params: { playlistID: string 
           error:
             "Spotify returned 403 Forbidden for playlist items. This can occur due to access restrictions on playlist contents and/or missing scopes. Try signing out/in again (prompt=consent).",
           spotify: data,
-          status: 403,
         },
         { status: 403 }
       );
     }
 
     return NextResponse.json(
-      { error: data?.error?.message ?? "Spotify request failed", spotify: data, status: res.status },
+      { error: data?.error?.message ?? "Spotify request failed", spotify: data },
       { status: res.status }
     );
   }
