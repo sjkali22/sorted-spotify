@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { signOut, useSession } from "next-auth/react";
 
 type StatsRange = "4w" | "6m" | "12m";
@@ -37,6 +37,32 @@ function writePrefs(p: SettingsPrefs) {
   window.localStorage.setItem(LS_KEY, JSON.stringify(p));
 }
 
+function isSamePrefs(a: SettingsPrefs, b: SettingsPrefs) {
+  return (
+    a.defaultStatsRange === b.defaultStatsRange &&
+    a.defaultPlaylistSort === b.defaultPlaylistSort &&
+    a.defaultSortDir === b.defaultSortDir
+  );
+}
+
+function prettyRange(r: StatsRange) {
+  if (r === "4w") return "4 weeks";
+  if (r === "6m") return "6 months";
+  return "12 months";
+}
+
+function prettySort(s: PlaylistSort) {
+  if (s === "track") return "Track name";
+  if (s === "artist") return "Artist";
+  if (s === "album") return "Album";
+  if (s === "popularity") return "Popularity";
+  return "Date added";
+}
+
+function prettyDir(d: SortDir) {
+  return d === "asc" ? "Ascending" : "Descending";
+}
+
 export default function SettingsPage() {
   const { data: session, status } = useSession();
 
@@ -66,7 +92,22 @@ export default function SettingsPage() {
     "—";
 
   const sessionLabel =
-    status === "authenticated" ? "Active" : status === "loading" ? "Loading" : "Not signed in";
+    status === "authenticated"
+      ? "Active"
+      : status === "loading"
+        ? "Loading"
+        : "Not signed in";
+
+  const initials = useMemo(() => {
+    const name = String(displayName ?? "").trim();
+    if (!name || name === "—") return "S";
+    const parts = name.split(/\s+/).filter(Boolean);
+    const a = parts[0]?.[0] ?? "S";
+    const b = parts.length > 1 ? parts[parts.length - 1]?.[0] : "";
+    return (a + b).toUpperCase();
+  }, [displayName]);
+
+  const dirty = useMemo(() => !isSamePrefs(draft, prefs), [draft, prefs]);
 
   function onSave() {
     setPrefs(draft);
@@ -97,114 +138,144 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-6 py-8">
-      <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
+          <p className="mt-1 text-sm text-white/50">
+            Preferences are saved locally on this device.
+          </p>
+        </div>
+
+        {dirty ? (
+          <div className="rounded-full border border-amber-400/25 bg-amber-400/10 px-3 py-1 text-xs text-amber-200">
+            Unsaved changes
+          </div>
+        ) : null}
+      </div>
 
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* LEFT: Preferences */}
-        <div className="lg:col-span-2 space-y-6">
-          <section className="rounded-2xl border border-white/15 bg-white/5 p-6">
-            <h2 className="text-sm font-semibold tracking-wide text-white/80">PREFERENCES</h2>
-
-            <div className="mt-5 grid grid-cols-1 gap-5">
-              <div>
-                <label className="block text-xs font-medium text-white/70">DEFAULT STATS RANGE</label>
-                <select
-                  className="mt-2 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/20"
-                  value={draft.defaultStatsRange}
-                  onChange={(e) =>
-                    setDraft((d) => ({ ...d, defaultStatsRange: e.target.value as StatsRange }))
-                  }
-                >
-                  <option value="4w">4 WEEKS</option>
-                  <option value="6m">6 MONTHS</option>
-                  <option value="12m">12 MONTHS</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-white/70">DEFAULT PLAYLIST SORT</label>
-                <select
-                  className="mt-2 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/20"
-                  value={draft.defaultPlaylistSort}
-                  onChange={(e) =>
-                    setDraft((d) => ({ ...d, defaultPlaylistSort: e.target.value as PlaylistSort }))
-                  }
-                >
-                  <option value="track">TRACK NAME</option>
-                  <option value="artist">ARTIST</option>
-                  <option value="album">ALBUM</option>
-                  <option value="popularity">POPULARITY</option>
-                  <option value="dateAdded">DATE ADDED</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-white/70">DEFAULT SORT DIRECTION</label>
-                <select
-                  className="mt-2 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/20"
-                  value={draft.defaultSortDir}
-                  onChange={(e) => setDraft((d) => ({ ...d, defaultSortDir: e.target.value as SortDir }))}
-                >
-                  <option value="asc">ASCENDING</option>
-                  <option value="desc">DESCENDING</option>
-                </select>
-              </div>
-
-              <div className="flex gap-3">
-                <button
-                  onClick={onSave}
-                  className="rounded-xl border border-white/15 bg-white/10 px-5 py-2 text-sm font-medium hover:bg-white/15"
-                >
-                  SAVE
-                </button>
-                <button
-                  onClick={onReset}
-                  className="rounded-xl border border-white/15 bg-black/20 px-5 py-2 text-sm font-medium hover:bg-black/30"
-                >
-                  RESET
-                </button>
-              </div>
+        <section className="lg:col-span-2 rounded-2xl border border-white/15 bg-white/5 p-6">
+          <div className="flex items-center justify-between gap-4">
+            <h2 className="text-sm font-semibold tracking-wide text-white/80">Preferences</h2>
+            <div className="text-xs text-white/45">
+              Current: {prettyRange(prefs.defaultStatsRange)} • {prettySort(prefs.defaultPlaylistSort)} •{" "}
+              {prettyDir(prefs.defaultSortDir)}
             </div>
-          </section>
-        </div>
+          </div>
 
-        {/* RIGHT: Account + Data & Access */}
-        <div className="space-y-6">
-          <section className="rounded-2xl border border-white/15 bg-white/5 p-6">
-            <h2 className="text-sm font-semibold tracking-wide text-white/80">ACCOUNT</h2>
-
-            <div className="mt-4 space-y-2 text-sm">
-              <div className="flex justify-between gap-4">
-                <span className="text-white/60">Spotify display name:</span>
-                <span className="text-white/90">{displayName}</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-white/60">Spotify user id:</span>
-                <span className="text-white/90">{spotifyUserId}</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-white/60">Email:</span>
-                <span className="text-white/90">{email}</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-white/60">Session:</span>
-                <span className="text-white/90">{sessionLabel}</span>
-              </div>
+          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <label className="block text-xs font-medium text-white/70">Default stats range</label>
+              <select
+                className="mt-2 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/20"
+                value={draft.defaultStatsRange}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, defaultStatsRange: e.target.value as StatsRange }))
+                }
+              >
+                <option value="4w">4 weeks</option>
+                <option value="6m">6 months</option>
+                <option value="12m">12 months</option>
+              </select>
             </div>
 
+            <div>
+              <label className="block text-xs font-medium text-white/70">Default playlist sort</label>
+              <select
+                className="mt-2 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/20"
+                value={draft.defaultPlaylistSort}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, defaultPlaylistSort: e.target.value as PlaylistSort }))
+                }
+              >
+                <option value="track">Track name</option>
+                <option value="artist">Artist</option>
+                <option value="album">Album</option>
+                <option value="popularity">Popularity</option>
+                <option value="dateAdded">Date added</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-white/70">Default sort direction</label>
+              <select
+                className="mt-2 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/20"
+                value={draft.defaultSortDir}
+                onChange={(e) => setDraft((d) => ({ ...d, defaultSortDir: e.target.value as SortDir }))}
+              >
+                <option value="asc">Ascending</option>
+                <option value="desc">Descending</option>
+              </select>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+              <div className="text-xs font-semibold text-white/70">Preview</div>
+              <div className="mt-2 text-sm text-white/85">
+                {prettyRange(draft.defaultStatsRange)}
+              </div>
+              <div className="mt-1 text-xs text-white/50">
+                {prettySort(draft.defaultPlaylistSort)} • {prettyDir(draft.defaultSortDir)}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <button
-              onClick={() => signOut({ callbackUrl: "/login" })}
-              className="mt-5 w-full rounded-xl border border-white/15 bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/15"
+              onClick={onReset}
+              disabled={!dirty}
+              className="rounded-xl border border-white/15 bg-black/20 px-5 py-2 text-sm font-medium hover:bg-black/30 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              SIGN OUT
+              Reset
             </button>
-          </section>
+            <button
+              onClick={onSave}
+              disabled={!dirty}
+              className="rounded-xl border border-white/15 bg-white/10 px-5 py-2 text-sm font-medium hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Save changes
+            </button>
+          </div>
+        </section>
 
-          <section className="rounded-2xl border border-white/15 bg-white/5 p-6">
-            <h2 className="text-sm font-semibold tracking-wide text-white/80">DATA &amp; ACCESS</h2>
+        {/* RIGHT: Account */}
+        <section className="rounded-2xl border border-white/15 bg-white/5 p-6">
+          <div className="flex items-center gap-4">
+            <div className="flex h-11 w-11 items-center justify-center rounded-full border border-white/15 bg-black/30 text-sm font-semibold">
+              {initials}
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-white/90">{displayName}</div>
+              <div className="truncate text-xs text-white/50">{email}</div>
+            </div>
+          </div>
 
-            <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-4">
-              <div className="text-xs font-semibold text-white/70">SPOTIFY ACCESS</div>
+          <div className="mt-5 space-y-2 text-sm">
+            <div className="flex justify-between gap-4">
+              <span className="text-white/60">Spotify user id</span>
+              <span className="text-white/90">{spotifyUserId}</span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="text-white/60">Session</span>
+              <span className="text-white/90">{sessionLabel}</span>
+            </div>
+          </div>
+
+          <button
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            className="mt-5 w-full rounded-xl border border-white/15 bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/15"
+          >
+            Sign out
+          </button>
+        </section>
+
+        {/* FULL WIDTH: Data & Access */}
+        <section className="lg:col-span-3 rounded-2xl border border-white/15 bg-white/5 p-6">
+          <h2 className="text-sm font-semibold tracking-wide text-white/80">Data &amp; Access</h2>
+
+          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+              <div className="text-xs font-semibold text-white/70">Spotify access</div>
               <p className="mt-2 text-xs text-white/50">
                 To fully revoke SORTED&apos;s access, remove it from Spotify Account Apps.
               </p>
@@ -212,13 +283,13 @@ export default function SettingsPage() {
                 onClick={openSpotifyApps}
                 className="mt-3 w-full rounded-xl border border-white/15 bg-black/20 px-4 py-2 text-xs font-medium hover:bg-black/30"
               >
-                OPEN SPOTIFY ACCESS APPS
+                Open Spotify access apps
               </button>
             </div>
 
-            <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
-              <div className="text-xs font-semibold text-white/70">SORTED APP DATA</div>
-              <p className="mt-2 text-xs text-white/50">Choose what to clear (does not affect Spotify):</p>
+            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+              <div className="text-xs font-semibold text-white/70">Local app data</div>
+              <p className="mt-2 text-xs text-white/50">Choose what to clear (does not affect Spotify).</p>
 
               <div className="mt-3 space-y-2 text-sm">
                 <label className="flex items-center gap-2 text-white/80">
@@ -244,11 +315,11 @@ export default function SettingsPage() {
                 onClick={clearAppData}
                 className="mt-4 w-full rounded-xl border border-white/15 bg-white/10 px-4 py-2 text-xs font-medium hover:bg-white/15"
               >
-                CLEAR APP DATA
+                Clear app data
               </button>
             </div>
-          </section>
-        </div>
+          </div>
+        </section>
       </div>
     </div>
   );

@@ -14,28 +14,26 @@ type Playlist = {
   public?: boolean;
   collaborative?: boolean;
   description?: string;
-  tracks?: { total?: number }; // legacy
-  items?: { total?: number }; // possible rename
-};
-
-type PlaylistItem = {
-  added_at?: string | null;
-  item?: any;
-  track?: any;
+  tracks?: { total?: number };
 };
 
 type SortMode = "default" | "name_asc" | "name_desc";
 
+type PlaylistsApiResponse = {
+  items: Playlist[];
+  total: number;
+  limit: number;
+  offset: number;
+  next: string | null;
+  error?: string;
+  retryAfter?: number;
+};
+
+const DISPLAY_PAGE_SIZE = 25;
+const FETCH_LIMIT = 50; // max Spotify allows for /me/playlists
+
 function pickImage(images?: SpotifyImage[]) {
   return images?.[0]?.url ?? "";
-}
-
-function formatArtist(media: any) {
-  const artists = media?.artists;
-  if (Array.isArray(artists) && artists.length) {
-    return artists.map((a: any) => a?.name).filter(Boolean).join(", ");
-  }
-  return "—";
 }
 
 function PrivacyBadge({ value }: { value: boolean | undefined }) {
@@ -77,192 +75,193 @@ function PrivacyBadge({ value }: { value: boolean | undefined }) {
   );
 }
 
+function mergeUniqueById(existing: Playlist[], incoming: Playlist[]) {
+  const map = new Map<string, Playlist>();
+  for (const p of existing) map.set(p.id, p);
+  for (const p of incoming) map.set(p.id, p);
+  return Array.from(map.values());
+}
+
 export default function PlaylistsPage() {
-  const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [loadingPlaylists, setLoadingPlaylists] = useState(true);
-  const [playlistsError, setPlaylistsError] = useState<string>("");
+  const [allPlaylists, setAllPlaylists] = useState<Playlist[]>([]);
+  const [total, setTotal] = useState(0);
+
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string>("");
+
+  const [retryAfter, setRetryAfter] = useState<number>(0);
 
   const [playlistSearch, setPlaylistSearch] = useState("");
-
   const [sortMode, setSortMode] = useState<SortMode>("default");
+
   const [sortOpen, setSortOpen] = useState(false);
   const [sortDraft, setSortDraft] = useState<SortMode>("default");
 
+  const [page, setPage] = useState(1);
+
   const [selectedId, setSelectedId] = useState<string>("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
   const selected = useMemo(
-    () => playlists.find((p) => p.id === selectedId) ?? null,
-    [playlists, selectedId]
+    () => allPlaylists.find((p) => p.id === selectedId) ?? null,
+    [allPlaylists, selectedId]
   );
 
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [drawerTab, setDrawerTab] = useState<"tools" | "items">("tools");
+  const fetchInFlightRef = useRef(false);
 
-  // Items infinite scroll state
-  const LIMIT = 50;
-  const [items, setItems] = useState<PlaylistItem[]>([]);
-  const [itemsTotal, setItemsTotal] = useState<number | null>(null);
-  const [itemsOffset, setItemsOffset] = useState(0);
-  const [itemsLoading, setItemsLoading] = useState(false);
-  const [itemsError, setItemsError] = useState<string>("");
+  async function fetchPlaylistsChunk(offset: number) {
+    const r = await fetch(`/api/spotify/playlists?limit=${FETCH_LIMIT}&offset=${offset}`, {
+      cache: "no-store",
+    });
 
-  const [query, setQuery] = useState("");
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
+    let body: PlaylistsApiResponse | null = null;
+    try {
+      body = (await r.json()) as PlaylistsApiResponse;
+    } catch {
+      body = null;
+    }
 
-  async function loadPlaylists() {
-    setLoadingPlaylists(true);
-    setPlaylistsError("");
+    if (!r.ok) {
+      const ra = Number((body as any)?.retryAfter ?? 0);
+      if (r.status === 429 && ra > 0) {
+        setRetryAfter(ra);
+        throw new Error(`Rate limited. Try again in ${ra}s.`);
+      }
+      const msg = (body as any)?.error ? String((body as any).error) : `Request failed (${r.status})`;
+      throw new Error(msg);
+    }
+
+    return body as PlaylistsApiResponse;
+  }
+
+  async function loadInitial() {
+    if (fetchInFlightRef.current) return;
+    fetchInFlightRef.current = true;
+
+    setLoading(true);
+    setError("");
+    setRetryAfter(0);
 
     try {
-      const r = await fetch("/api/spotify/playlists", { cache: "no-store" });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data?.error ?? "Failed to load playlists");
+      const data = await fetchPlaylistsChunk(0);
+      setAllPlaylists(data.items ?? []);
+      setTotal(Number(data.total ?? 0));
+      setPage(1);
 
-      const list = Array.isArray(data?.items) ? data.items : [];
-      setPlaylists(list);
-
-      if (selectedId && !list.some((p: Playlist) => p.id === selectedId)) {
+      if (selectedId && !data.items.some((p) => p.id === selectedId)) {
         setSelectedId("");
         setDrawerOpen(false);
       }
     } catch (e: any) {
-      setPlaylistsError(e?.message ?? "Failed to load playlists");
+      setError(e?.message ?? "Failed to load playlists");
+      setAllPlaylists([]);
+      setTotal(0);
     } finally {
-      setLoadingPlaylists(false);
+      setLoading(false);
+      fetchInFlightRef.current = false;
     }
   }
 
+  async function ensureLoadedUpTo(count: number) {
+    // Ensure we have at least `count` playlists cached (or we reach total).
+    if (retryAfter > 0) return;
+    if (fetchInFlightRef.current) return;
+
+    if (total > 0 && allPlaylists.length >= Math.min(count, total)) return;
+
+    fetchInFlightRef.current = true;
+    setLoadingMore(true);
+    setError("");
+
+    try {
+      let offset = allPlaylists.length;
+      let current = allPlaylists;
+
+      while ((total === 0 || offset < total) && current.length < count) {
+        const data = await fetchPlaylistsChunk(offset);
+        setTotal(Number(data.total ?? total));
+        current = mergeUniqueById(current, data.items ?? []);
+        offset = current.length;
+        setAllPlaylists(current);
+
+        if (!data.next) break;
+      }
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to load more playlists");
+    } finally {
+      setLoadingMore(false);
+      fetchInFlightRef.current = false;
+    }
+  }
+
+  async function ensureAllLoaded() {
+    if (retryAfter > 0) return;
+    if (fetchInFlightRef.current) return;
+
+    if (total > 0 && allPlaylists.length >= total) return;
+
+    fetchInFlightRef.current = true;
+    setLoadingMore(true);
+    setError("");
+
+    try {
+      let offset = allPlaylists.length;
+      let current = allPlaylists;
+
+      while (total === 0 || offset < total) {
+        const data = await fetchPlaylistsChunk(offset);
+        setTotal(Number(data.total ?? total));
+        current = mergeUniqueById(current, data.items ?? []);
+        offset = current.length;
+        setAllPlaylists(current);
+
+        if (!data.next) break;
+      }
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to load all playlists");
+    } finally {
+      setLoadingMore(false);
+      fetchInFlightRef.current = false;
+    }
+  }
+
+  // initial load
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (cancelled) return;
-      await loadPlaylists();
-    })();
-    return () => {
-      cancelled = true;
-    };
+    loadInitial();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // open drawer when selecting
   useEffect(() => {
     if (!selectedId) return;
     setDrawerOpen(true);
-    setDrawerTab("tools");
   }, [selectedId]);
 
+  // retry-after countdown
   useEffect(() => {
-    setItems([]);
-    setItemsTotal(null);
-    setItemsOffset(0);
-    setItemsLoading(false);
-    setItemsError("");
-    setQuery("");
-  }, [selectedId]);
+    if (retryAfter <= 0) return;
+    const t = window.setInterval(() => {
+      setRetryAfter((s) => (s <= 1 ? 0 : s - 1));
+    }, 1000);
+    return () => window.clearInterval(t);
+  }, [retryAfter]);
 
-  const canLoadMore = useMemo(() => {
-    if (itemsLoading) return false;
-    if (itemsTotal === null) return true;
-    return items.length < itemsTotal;
-  }, [itemsLoading, itemsTotal, items.length]);
-
-  async function loadNextPage() {
-    if (!selectedId) return;
-    if (!canLoadMore) return;
-
-    setItemsLoading(true);
-    setItemsError("");
-
-    try {
-      const r = await fetch(
-        `/api/spotify/playlists/${encodeURIComponent(selectedId)}/items?limit=${LIMIT}&offset=${itemsOffset}`,
-        { cache: "no-store" }
-      );
-
-      const data = await r.json();
-
-      if (!r.ok) {
-        throw new Error(
-          data?.error?.message ||
-            data?.error ||
-            "Playlist items unavailable (Spotify restrictions)."
-        );
-      }
-
-      const pageItems: PlaylistItem[] = Array.isArray(data?.items) ? data.items : [];
-      const total: number = typeof data?.total === "number" ? data.total : itemsTotal ?? pageItems.length;
-
-      setItemsTotal(total);
-      setItems((prev) => {
-        const seen = new Set(
-          prev.map((x: any) => `${x?.item?.id ?? x?.track?.id ?? "x"}|${x?.added_at ?? ""}`)
-        );
-
-        const merged = [...prev];
-        for (const it of pageItems) {
-          const media = it.item ?? it.track ?? null;
-          const key = `${media?.id ?? "x"}|${it?.added_at ?? ""}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            merged.push(it);
-          }
-        }
-        return merged;
-      });
-
-      setItemsOffset((o) => o + LIMIT);
-    } catch (e: any) {
-      setItemsError(e?.message ?? "Failed to load items");
-    } finally {
-      setItemsLoading(false);
-    }
-  }
-
+  // If user starts searching, fetch remaining pages once so search is global.
   useEffect(() => {
-    if (drawerTab !== "items") return;
-    if (!selectedId) return;
-    if (items.length === 0 && !itemsLoading && !itemsError) loadNextPage();
+    const q = playlistSearch.trim();
+    if (!q) return;
+
+    const handle = window.setTimeout(() => {
+      ensureAllLoaded();
+    }, 300);
+
+    return () => window.clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawerTab, selectedId]);
+  }, [playlistSearch]);
 
-  useEffect(() => {
-    if (drawerTab !== "items") return;
-    if (!sentinelRef.current) return;
-
-    const el = sentinelRef.current;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        const first = entries[0];
-        if (first?.isIntersecting) loadNextPage();
-      },
-      { root: null, rootMargin: "200px", threshold: 0 }
-    );
-
-    obs.observe(el);
-    return () => obs.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawerTab, canLoadMore, itemsOffset, selectedId]);
-
-  const filteredItems = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return items;
-
-    return items.filter((it) => {
-      const media = it.item ?? it.track ?? null;
-      const name = String(media?.name ?? "").toLowerCase();
-      const artists = String(formatArtist(media)).toLowerCase();
-      const album = String(media?.album?.name ?? "").toLowerCase();
-      return name.includes(q) || artists.includes(q) || album.includes(q);
-    });
-  }, [items, query]);
-
-  const filteredPlaylists = useMemo(() => {
-    const q = playlistSearch.trim().toLowerCase();
-    let list = q
-      ? playlists.filter((p) => {
-          const name = String(p.name ?? "").toLowerCase();
-          const owner = String(p.owner?.display_name ?? "").toLowerCase();
-          return name.includes(q) || owner.includes(q);
-        })
-      : playlists;
+  const sortedPlaylists = useMemo(() => {
+    let list = allPlaylists;
 
     if (sortMode === "name_asc") {
       list = [...list].sort((a, b) =>
@@ -275,23 +274,74 @@ export default function PlaylistsPage() {
     }
 
     return list;
-  }, [playlists, playlistSearch, sortMode]);
+  }, [allPlaylists, sortMode]);
 
-  const sortBadge = useMemo(() => (sortMode === "default" ? 0 : 1), [sortMode]);
+  const filteredPlaylists = useMemo(() => {
+    const q = playlistSearch.trim().toLowerCase();
+    if (!q) return sortedPlaylists;
+
+    return sortedPlaylists.filter((p) => {
+      const name = String(p.name ?? "").toLowerCase();
+      const owner = String(p.owner?.display_name ?? "").toLowerCase();
+      return name.includes(q) || owner.includes(q);
+    });
+  }, [sortedPlaylists, playlistSearch]);
+
+  // Page count rules:
+  // - No search: use Spotify-reported total (even if not fully loaded yet).
+  // - Search: use filtered length (requires fetching all to be complete).
+  const isSearching = playlistSearch.trim().length > 0;
+  const totalPages = useMemo(() => {
+    const n = isSearching ? filteredPlaylists.length : total;
+    return Math.max(1, Math.ceil(n / DISPLAY_PAGE_SIZE));
+  }, [filteredPlaylists.length, isSearching, total]);
+
+  const currentPage = Math.min(Math.max(page, 1), totalPages);
+
+  // If user navigates to a page we haven't loaded yet (no-search mode), load enough.
+  useEffect(() => {
+    if (isSearching) return; // search already triggers ensureAllLoaded
+    const needed = currentPage * DISPLAY_PAGE_SIZE;
+    ensureLoadedUpTo(needed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, isSearching, total]);
+
+  const pageSlice = useMemo(() => {
+    const start = (currentPage - 1) * DISPLAY_PAGE_SIZE;
+    const end = start + DISPLAY_PAGE_SIZE;
+    return filteredPlaylists.slice(start, end);
+  }, [filteredPlaylists, currentPage]);
 
   function openSort() {
     setSortDraft(sortMode);
     setSortOpen(true);
   }
-
   function closeSort() {
     setSortOpen(false);
   }
-
   function applySort() {
     setSortMode(sortDraft);
     setSortOpen(false);
   }
+
+  function goToPage(p: number) {
+    setPage(p);
+  }
+
+  const pageButtons = useMemo(() => {
+    const buttons: number[] = [];
+    const start = Math.max(1, currentPage - 2);
+    const end = Math.min(totalPages, currentPage + 2);
+
+    for (let i = start; i <= end; i++) buttons.push(i);
+
+    // Ensure first/last context
+    if (!buttons.includes(1)) buttons.unshift(1);
+    if (!buttons.includes(totalPages)) buttons.push(totalPages);
+
+    // Deduplicate
+    return Array.from(new Set(buttons));
+  }, [currentPage, totalPages]);
 
   return (
     <main className="min-h-[calc(100vh-56px)] bg-zinc-900 text-zinc-100">
@@ -306,78 +356,120 @@ export default function PlaylistsPage() {
               title="Sort playlists"
             >
               Sort
-              {sortBadge > 0 ? (
+              {sortMode === "default" ? null : (
                 <span className="ml-2 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-amber-400 px-2 text-xs font-semibold text-black">
-                  {sortBadge}
+                  1
                 </span>
-              ) : null}
+              )}
             </button>
 
             <button
-              onClick={loadPlaylists}
+              onClick={loadInitial}
               className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm hover:bg-zinc-800/40 disabled:opacity-50"
-              disabled={loadingPlaylists}
+              disabled={loading || loadingMore}
               title="Refresh playlists"
             >
-              {loadingPlaylists ? "Refreshing…" : "Refresh"}
+              {loading ? "Refreshing…" : "Refresh"}
             </button>
           </div>
         </div>
 
-        {playlistsError ? <p className="mt-3 text-sm text-red-300">{playlistsError}</p> : null}
+        {error ? <p className="mt-3 text-sm text-red-300">{error}</p> : null}
+        {retryAfter > 0 ? (
+          <p className="mt-2 text-xs text-zinc-400">Retry available in {retryAfter}s</p>
+        ) : null}
 
-        <div className="mt-4">
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <input
             value={playlistSearch}
-            onChange={(e) => setPlaylistSearch(e.target.value)}
+            onChange={(e) => {
+              setPlaylistSearch(e.target.value);
+              setPage(1);
+            }}
             placeholder="Search playlists…"
             className="w-full max-w-md rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm outline-none"
           />
+
+          <div className="flex items-center gap-2 text-sm text-zinc-300">
+            <span>
+              Page <span className="font-semibold text-zinc-100">{currentPage}</span> / {totalPages}
+            </span>
+            {loadingMore ? <span className="text-xs text-zinc-400">Loading…</span> : null}
+          </div>
         </div>
 
-        {loadingPlaylists ? (
+        {loading ? (
           <p className="mt-6 text-sm text-zinc-400">Loading…</p>
         ) : filteredPlaylists.length === 0 ? (
           <p className="mt-6 text-sm text-zinc-400">No playlists found.</p>
         ) : (
-          <div
-            className="
-              mt-6 grid grid-cols-2 gap-4
-              sm:grid-cols-3
-              md:grid-cols-4
-              lg:grid-cols-5
-            "
-          >
-            {filteredPlaylists.map((p) => {
-              const cover = pickImage(p.images);
-              const active = p.id === selectedId;
+          <>
+            <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              {pageSlice.map((p) => {
+                const cover = pickImage(p.images);
+                const active = p.id === selectedId;
 
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => setSelectedId(p.id)}
-                  className={`group relative overflow-hidden rounded-xl border text-left ${
-                    active ? "border-zinc-600" : "border-zinc-800"
-                  } bg-zinc-950/30 hover:bg-zinc-800/20`}
-                >
-                  <div className="relative aspect-square w-full bg-zinc-800">
-                    {cover ? <Image src={cover} alt="" fill className="object-cover" /> : null}
-                    <PrivacyBadge value={p.public} />
-                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-3">
-                      <div className="truncate text-sm font-semibold">{p.name}</div>
-                      <div className="mt-1 truncate text-xs text-zinc-300">
-                        {p.owner?.display_name ? `By ${p.owner.display_name}` : " "}
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => setSelectedId(p.id)}
+                    className={`group relative overflow-hidden rounded-xl border text-left ${
+                      active ? "border-zinc-600" : "border-zinc-800"
+                    } bg-zinc-950/30 hover:bg-zinc-800/20`}
+                  >
+                    <div className="relative aspect-square w-full bg-zinc-800">
+                      {cover ? <Image src={cover} alt="" fill className="object-cover" /> : null}
+                      <PrivacyBadge value={p.public} />
+                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-3">
+                        <div className="truncate text-sm font-semibold">{p.name}</div>
+                        <div className="mt-1 truncate text-xs text-zinc-300">
+                          {p.owner?.display_name ? `By ${p.owner.display_name}` : " "}
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Pagination controls */}
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+              <button
+                onClick={() => goToPage(currentPage - 1)}
+                disabled={currentPage <= 1 || retryAfter > 0}
+                className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm hover:bg-zinc-800/40 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Prev
+              </button>
+
+              {pageButtons.map((p) => (
+                <button
+                  key={p}
+                  onClick={() => goToPage(p)}
+                  disabled={retryAfter > 0}
+                  className={`rounded-lg border px-3 py-2 text-sm ${
+                    p === currentPage
+                      ? "border-zinc-600 bg-zinc-800/40"
+                      : "border-zinc-800 bg-zinc-900/30 hover:bg-zinc-800/40"
+                  } disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  {p}
                 </button>
-              );
-            })}
-          </div>
+              ))}
+
+              <button
+                onClick={() => goToPage(currentPage + 1)}
+                disabled={currentPage >= totalPages || retryAfter > 0}
+                className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm hover:bg-zinc-800/40 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </>
         )}
       </div>
 
-      {/* Sort modal (ONLY sort options) */}
+      {/* Sort modal */}
       {sortOpen ? (
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/50" onClick={closeSort} />
@@ -446,7 +538,7 @@ export default function PlaylistsPage() {
         </div>
       ) : null}
 
-      {/* Drawer overlay */}
+      {/* Drawer (unchanged simple open link) */}
       <div className={`fixed inset-0 z-40 ${drawerOpen ? "" : "pointer-events-none"}`} aria-hidden={!drawerOpen}>
         <div
           className={`absolute inset-0 bg-black/40 transition-opacity ${drawerOpen ? "opacity-100" : "opacity-0"}`}
@@ -474,128 +566,17 @@ export default function PlaylistsPage() {
             </button>
           </div>
 
-          <div className="flex gap-2 border-b border-zinc-800 p-3">
-            <button
-              onClick={() => setDrawerTab("tools")}
-              className={`flex-1 rounded-lg px-3 py-2 text-sm ${
-                drawerTab === "tools"
-                  ? "bg-zinc-700"
-                  : "border border-zinc-800 bg-zinc-900/30 hover:bg-zinc-800/40"
-              }`}
+          <div className="p-4">
+            <div className="text-xs font-semibold text-zinc-400">OPEN</div>
+            <a
+              className="mt-2 block rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm hover:bg-zinc-800/40"
+              href={selected ? `https://open.spotify.com/playlist/${selected.id}` : "#"}
+              target="_blank"
+              rel="noreferrer"
             >
-              Tools
-            </button>
-            <button
-              onClick={() => setDrawerTab("items")}
-              className={`flex-1 rounded-lg px-3 py-2 text-sm ${
-                drawerTab === "items"
-                  ? "bg-zinc-700"
-                  : "border border-zinc-800 bg-zinc-900/30 hover:bg-zinc-800/40"
-              }`}
-            >
-              List items
-            </button>
+              Open on Spotify
+            </a>
           </div>
-
-          {drawerTab === "tools" ? (
-            <div className="p-4">
-              <div className="text-xs font-semibold text-zinc-400">CREATION TOOLS</div>
-              <div className="mt-2 space-y-2 text-sm">
-                <button className="w-full rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-left hover:bg-zinc-800/40">
-                  Create similar (placeholder)
-                </button>
-                <button className="w-full rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-left hover:bg-zinc-800/40">
-                  Filtered by genre (placeholder)
-                </button>
-                <button className="w-full rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-left hover:bg-zinc-800/40">
-                  Dedupe (placeholder)
-                </button>
-                <button className="w-full rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-left hover:bg-zinc-800/40">
-                  Shuffle (placeholder)
-                </button>
-              </div>
-
-              <div className="mt-6 text-xs font-semibold text-zinc-400">OPEN</div>
-              <a
-                className="mt-2 block rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm hover:bg-zinc-800/40"
-                href={selected ? `https://open.spotify.com/playlist/${selected.id}` : "#"}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Open on Spotify
-              </a>
-            </div>
-          ) : (
-            <div className="flex h-[calc(100%-112px)] flex-col">
-              <div className="border-b border-zinc-800 p-3">
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search items…"
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm outline-none"
-                />
-                <div className="mt-2 flex items-center justify-between text-xs text-zinc-400">
-                  <span>
-                    Loaded: {items.length}
-                    {itemsTotal !== null ? ` / ${itemsTotal}` : ""}
-                  </span>
-                  <button
-                    className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-2 py-1 hover:bg-zinc-800/40"
-                    onClick={() => {
-                      setItems([]);
-                      setItemsTotal(null);
-                      setItemsOffset(0);
-                      setItemsError("");
-                      setTimeout(() => loadNextPage(), 0);
-                    }}
-                  >
-                    Refresh
-                  </button>
-                </div>
-
-                {itemsError ? (
-                  <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/30 p-2 text-xs text-zinc-300">
-                    {itemsError}
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-3">
-                {filteredItems.map((it, idx) => {
-                  const media = it.item ?? it.track ?? null;
-                  const name = media?.name ?? "—";
-                  const artists = formatArtist(media);
-                  const album = media?.album?.name ?? "—";
-                  const img = pickImage(media?.album?.images);
-
-                  return (
-                    <div
-                      key={`${media?.id ?? "x"}-${it?.added_at ?? idx}-${idx}`}
-                      className="mb-2 flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/20 p-3"
-                    >
-                      <div className="relative h-10 w-10 overflow-hidden rounded-md bg-zinc-800">
-                        {img ? <Image src={img} alt="" fill className="object-cover" /> : null}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold">{name}</div>
-                        <div className="truncate text-xs text-zinc-400">
-                          {artists} · {album}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {itemsLoading ? <p className="mt-2 text-xs text-zinc-400">Loading…</p> : null}
-
-                <div ref={sentinelRef} className="h-10" />
-
-                {!itemsLoading && itemsTotal !== null && items.length >= itemsTotal ? (
-                  <p className="mt-2 text-xs text-zinc-500">All items loaded.</p>
-                ) : null}
-              </div>
-            </div>
-          )}
         </aside>
       </div>
     </main>

@@ -1,51 +1,53 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "../../auth/[...nextauth]/route";
+import { spotifyFetch, isSpotifyApiError } from "@/lib/spotify";
 
+type SpotifyError = { status?: number; message?: string };
 type SpotifyPlaylistsPage = {
   items?: unknown[];
   next?: string | null;
   total?: number;
-  error?: { message?: string };
+  limit?: number;
+  offset?: number;
+  error?: SpotifyError;
 };
 
-export async function GET() {
-  const session = await getServerSession(authOptions);
-  const accessToken = (session as any)?.accessToken as string | undefined;
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
 
-  if (!accessToken) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
+  const limitRaw = Number(searchParams.get("limit") ?? "50");
+  const offsetRaw = Number(searchParams.get("offset") ?? "0");
 
-  const all: unknown[] = [];
-  const limit = 50;
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 50;
+  const offset = Number.isFinite(offsetRaw) ? Math.max(offsetRaw, 0) : 0;
 
-  let url: string | null = `https://api.spotify.com/v1/me/playlists?limit=${limit}&offset=0`;
-  let safety = 0;
+  try {
+    const data = await spotifyFetch<SpotifyPlaylistsPage>(
+      `/v1/me/playlists?limit=${limit}&offset=${offset}`
+    );
 
-  while (url) {
-    safety += 1;
-    if (safety > 50) break;
-
-    const res: Response = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      cache: "no-store",
+    return NextResponse.json({
+      items: data.items ?? [],
+      total: data.total ?? 0,
+      limit: data.limit ?? limit,
+      offset: data.offset ?? offset,
+      next: data.next ?? null,
     });
-
-    const data: SpotifyPlaylistsPage = (await res
-      .json()
-      .catch(() => ({}))) as SpotifyPlaylistsPage;
-
-    if (!res.ok) {
-      return NextResponse.json(
-        { error: data?.error?.message ?? "Spotify playlists request failed" },
-        { status: res.status }
-      );
+  } catch (e: unknown) {
+    // Normal path: our spotifyFetch throws SpotifyApiError
+    if (isSpotifyApiError(e)) {
+      if (e.status === 429) {
+        const retryAfter = typeof e.retryAfter === "number" ? e.retryAfter : 30;
+        return NextResponse.json(
+          { error: e.message, retryAfter },
+          { status: 429, headers: { "retry-after": String(retryAfter) } }
+        );
+      }
+      return NextResponse.json({ error: e.message }, { status: e.status });
     }
 
-    all.push(...(data.items ?? []));
-    url = data.next ?? null;
+    // Fallback: never hide the actual error again
+    const msg =
+      e instanceof Error ? e.message : typeof e === "string" ? e : "Unknown error";
+    return NextResponse.json({ error: `Spotify playlists request failed: ${msg}` }, { status: 502 });
   }
-
-  return NextResponse.json({ items: all, total: all.length });
 }
