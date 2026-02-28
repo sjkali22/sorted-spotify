@@ -24,15 +24,15 @@ type RecentlyPlayed = {
       id: string;
       name: string;
       artists: { name: string }[];
-      album: { images?: SpotifyImage[] };
+      album: { name: string; images?: SpotifyImage[] };
       external_urls?: { spotify?: string };
     };
   }[];
 };
 
-function pickImage(images?: SpotifyImage[]) {
+function pickLargeImage(images?: SpotifyImage[]) {
   if (!images || images.length === 0) return null;
-  return images[images.length - 1]?.url ?? images[0]?.url ?? null;
+  return images[0]?.url ?? images[images.length - 1]?.url ?? null;
 }
 
 function formatTime(ms?: number) {
@@ -41,6 +41,24 @@ function formatTime(ms?: number) {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function timeAgo(iso: string) {
+  const played = new Date(iso).getTime();
+  const now = Date.now();
+  if (!Number.isFinite(played)) return "";
+
+  const diffSec = Math.floor((now - played) / 1000);
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+
+  const mins = Math.floor(diffSec / 60);
+  const hours = Math.floor(mins / 60);
+  const days = Math.floor(hours / 24);
+
+  if (diffSec < 60) return rtf.format(-diffSec, "second");
+  if (mins < 60) return rtf.format(-mins, "minute");
+  if (hours < 24) return rtf.format(-hours, "hour");
+  return rtf.format(-days, "day");
 }
 
 export default function HomePage() {
@@ -53,7 +71,8 @@ export default function HomePage() {
   const durationRef = useRef(0);
 
   const track = now?.item;
-  const artwork = pickImage(track?.album?.images);
+
+  const artworkLarge = pickLargeImage(track?.album?.images);
   const artistNames = track?.artists?.map((a) => a.name).join(", ") ?? "";
   const albumName = track?.album?.name ?? "";
   const openUrl = track?.external_urls?.spotify ?? null;
@@ -101,12 +120,12 @@ export default function HomePage() {
 
     async function loadRecent() {
       try {
-        const res = await fetch("/api/spotify/recently-played?limit=10", { cache: "no-store" });
+        const res = await fetch("/api/spotify/recently-played?limit=20", { cache: "no-store" });
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error ?? `Recently played failed (${res.status})`);
         if (!cancelled) setRecent(data);
-      } catch (e: any) {
-        // keep silent; page still works without it
+      } catch {
+        // silent
       }
     }
 
@@ -150,7 +169,17 @@ export default function HomePage() {
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-4">
               <div className="relative h-28 w-28 overflow-hidden rounded-md bg-surface-hover">
-                {artwork ? <Image src={artwork} alt="Album art" fill className="object-cover" /> : null}
+                {artworkLarge ? (
+                  <Image
+                    src={artworkLarge}
+                    alt="Album art"
+                    fill
+                    className="object-cover"
+                    quality={100}
+                    sizes="112px"
+                    priority
+                  />
+                ) : null}
               </div>
 
               <div>
@@ -172,7 +201,7 @@ export default function HomePage() {
 
             {openUrl ? (
               <a
-                className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
+                className="rounded-lg bg-accent px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-hover active:bg-accent-pressed focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
                 href={openUrl}
                 target="_blank"
                 rel="noreferrer"
@@ -185,65 +214,77 @@ export default function HomePage() {
       </section>
 
       <section className="mt-8 rounded-md border border-border bg-surface p-5">
-        <h2 className="text-sm font-semibold text-text-primary">Recently Played</h2>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-sm font-semibold text-text-primary">Recent streams</h2>
+            <p className="mt-1 text-sm text-text-muted">Your recently played tracks</p>
+          </div>
+        </div>
 
         {!recent?.items || recent.items.length === 0 ? (
           <p className="mt-4 text-sm text-text-muted">No recently played items found.</p>
         ) : (
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="text-left text-text-muted">
-                  <th className="py-2">Artwork</th>
-                  <th className="py-2">Track</th>
-                  <th className="py-2">Artist</th>
-                  <th className="py-2">Played at</th>
-                  <th className="py-2">Open</th>
-                </tr>
-              </thead>
+          <div className="mt-4 overflow-hidden rounded-md border border-border">
+            <div className="hidden grid-cols-[56px_2fr_1.5fr_1.5fr_140px] border-b border-border bg-surface md:grid">
+              <div className="px-3 py-3" />
+              <div className="px-3 py-3 text-center text-xs font-semibold text-text-muted">Track</div>
+              <div className="px-3 py-3 text-center text-xs font-semibold text-text-muted">Artist</div>
+              <div className="px-3 py-3 text-center text-xs font-semibold text-text-muted">Album</div>
+              <div className="px-3 py-3" />
+            </div>
 
-              <tbody>
-                {recent.items.map((row) => {
-                  const img = pickImage(row.track.album.images);
-                  const playedAt = new Date(row.played_at).toLocaleString();
-                  const url = row.track.external_urls?.spotify ?? null;
+            <div className="divide-y divide-border">
+              {recent.items.map((row) => {
+                const img = pickLargeImage(row.track.album.images); // higher-res
+                const artists = row.track.artists.map((a) => a.name).join(", ");
+                const album = row.track.album.name;
+                const ago = timeAgo(row.played_at);
 
-                  return (
-                    <tr
-                      key={`${row.track.id}-${row.played_at}`}
-                      className="border-t border-border"
-                    >
-                      <td className="py-2">
-                        <div className="relative h-10 w-10 overflow-hidden rounded bg-surface-hover">
-                          {img ? <Image src={img} alt="" fill className="object-cover" /> : null}
+                return (
+                  <div
+                    key={`${row.track.id}-${row.played_at}`}
+                    className="grid grid-cols-[56px_1fr] gap-3 px-3 py-5 md:grid-cols-[56px_2fr_1.5fr_1.5fr_140px] md:gap-0"
+                  >
+                    <div className="flex items-center">
+                      <div className="relative h-11 w-11 overflow-hidden rounded bg-surface-hover">
+                        {img ? (
+                          <Image
+                            src={img}
+                            alt=""
+                            fill
+                            className="object-cover"
+                            quality={90}
+                            // request a larger optimized size than the visual box for sharper downscaling
+                            sizes="96px"
+                          />
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="min-w-0 md:px-3 md:flex md:items-center">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-text-primary">{row.track.name}</div>
+                        <div className="mt-0.5 truncate text-xs text-text-muted md:hidden">
+                          {artists} • {album}
                         </div>
-                      </td>
+                      </div>
+                    </div>
 
-                      <td className="py-2 text-text-primary">{row.track.name}</td>
-                      <td className="py-2 text-text-secondary">
-                        {row.track.artists.map((a) => a.name).join(", ")}
-                      </td>
-                      <td className="py-2 text-text-muted">{playedAt}</td>
+                    <div className="hidden min-w-0 px-3 md:flex md:items-center md:justify-center">
+                      <div className="truncate text-sm text-text-secondary text-center">{artists}</div>
+                    </div>
 
-                      <td className="py-2">
-                        {url ? (
-                          <a
-                            className="text-accent hover:underline hover:underline-offset-4"
-                            href={url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Open
-                          </a>
-                        ) : (
-                          <span className="text-text-muted">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                    <div className="hidden min-w-0 px-3 md:flex md:items-center md:justify-center">
+                      <div className="truncate text-sm text-text-secondary text-center">{album}</div>
+                    </div>
+
+                    <div className="flex items-center justify-end md:px-3">
+                      <div className="text-xs text-text-muted">{ago}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </section>
