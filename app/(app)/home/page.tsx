@@ -48,7 +48,6 @@ export default function HomePage() {
   const [recent, setRecent] = useState<RecentlyPlayed | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // local, ticking progress
   const [liveProgress, setLiveProgress] = useState(0);
   const playingRef = useRef(false);
   const durationRef = useRef(0);
@@ -64,7 +63,6 @@ export default function HomePage() {
     return d;
   }, [track?.duration_ms]);
 
-  // Fetch now playing every 5s
   useEffect(() => {
     let cancelled = false;
 
@@ -81,8 +79,7 @@ export default function HomePage() {
         setLiveProgress(p);
 
         playingRef.current = !!data?.is_playing;
-        durationRef.current =
-          typeof data?.item?.duration_ms === "number" ? data.item.duration_ms : 0;
+        durationRef.current = typeof data?.item?.duration_ms === "number" ? data.item.duration_ms : 0;
 
         setError(null);
       } catch (e: any) {
@@ -99,7 +96,6 @@ export default function HomePage() {
     };
   }, []);
 
-  // Fetch recently played once (and you can refresh later if needed)
   useEffect(() => {
     let cancelled = false;
 
@@ -120,7 +116,6 @@ export default function HomePage() {
     };
   }, []);
 
-  // Tick progress every 1s while playing
   useEffect(() => {
     const timer = setInterval(() => {
       if (!playingRef.current) return;
@@ -137,45 +132,51 @@ export default function HomePage() {
   }, []);
 
   const pct = duration > 0 ? Math.min(100, Math.max(0, (liveProgress / duration) * 100)) : 0;
-
   const showEmpty = !track || now?.is_playing === false;
 
   return (
-    <main className="mx-auto max-w-6xl p-6">
-      <h1 className="text-2xl font-semibold">Home</h1>
+    <div className="mx-auto max-w-6xl px-6 py-6">
+      <h1 className="text-2xl font-semibold text-text-primary">Home</h1>
 
-      <section className="mt-6 rounded-md border p-5">
+      <section className="mt-6 rounded-md border border-border bg-surface p-5">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Now Playing</h2>
-          {error ? <p className="text-xs text-red-600">{error}</p> : null}
+          <h2 className="text-sm font-semibold text-text-primary">Now Playing</h2>
+          {error ? <p className="text-xs text-red-500">{error}</p> : null}
         </div>
 
         {showEmpty ? (
-          <p className="mt-4 text-sm text-neutral-600">Nothing playing right now.</p>
+          <p className="mt-4 text-sm text-text-muted">Nothing playing right now.</p>
         ) : (
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-4">
-              <div className="relative h-28 w-28 overflow-hidden rounded-md bg-neutral-200">
+              <div className="relative h-28 w-28 overflow-hidden rounded-md bg-surface-hover">
                 {artwork ? <Image src={artwork} alt="Album art" fill className="object-cover" /> : null}
               </div>
 
               <div>
-                <p className="text-lg font-semibold">{track.name}</p>
-                <p className="text-sm text-neutral-700">{artistNames}</p>
-                <p className="text-sm text-neutral-600">{albumName}</p>
+                <p className="text-lg font-semibold text-text-primary">{track.name}</p>
+                <p className="text-sm text-text-secondary">{artistNames}</p>
+                <p className="text-sm text-text-muted">{albumName}</p>
 
                 <div className="mt-3 flex items-center gap-3">
-                  <span className="text-xs text-neutral-600">{formatTime(liveProgress)}</span>
-                  <div className="h-2 w-64 overflow-hidden rounded bg-neutral-200">
-                    <div className="h-full bg-neutral-900" style={{ width: `${pct}%` }} />
+                  <span className="text-xs text-text-muted">{formatTime(liveProgress)}</span>
+
+                  <div className="h-2 w-64 overflow-hidden rounded bg-surface-hover">
+                    <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
                   </div>
-                  <span className="text-xs text-neutral-600">{formatTime(duration)}</span>
+
+                  <span className="text-xs text-text-muted">{formatTime(duration)}</span>
                 </div>
               </div>
             </div>
 
             {openUrl ? (
-              <a className="rounded-md border px-3 py-2 text-sm" href={openUrl} target="_blank" rel="noreferrer">
+              <a
+                className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
+                href={openUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
                 Open in Spotify
               </a>
             ) : null}
@@ -183,16 +184,16 @@ export default function HomePage() {
         )}
       </section>
 
-      <section className="mt-8 rounded-md border p-5">
-        <h2 className="text-sm font-semibold">Recently Played</h2>
+      <section className="mt-8 rounded-md border border-border bg-surface p-5">
+        <h2 className="text-sm font-semibold text-text-primary">Recently Played</h2>
 
         {!recent?.items || recent.items.length === 0 ? (
-          <p className="mt-4 text-sm text-neutral-600">No recently played items found.</p>
+          <p className="mt-4 text-sm text-text-muted">No recently played items found.</p>
         ) : (
           <div className="mt-4 overflow-x-auto">
             <table className="w-full border-collapse text-sm">
               <thead>
-                <tr className="text-left text-neutral-600">
+                <tr className="text-left text-text-muted">
                   <th className="py-2">Artwork</th>
                   <th className="py-2">Track</th>
                   <th className="py-2">Artist</th>
@@ -200,6 +201,7 @@ export default function HomePage() {
                   <th className="py-2">Open</th>
                 </tr>
               </thead>
+
               <tbody>
                 {recent.items.map((row) => {
                   const img = pickImage(row.track.album.images);
@@ -207,22 +209,34 @@ export default function HomePage() {
                   const url = row.track.external_urls?.spotify ?? null;
 
                   return (
-                    <tr key={`${row.track.id}-${row.played_at}`} className="border-t">
+                    <tr
+                      key={`${row.track.id}-${row.played_at}`}
+                      className="border-t border-border"
+                    >
                       <td className="py-2">
-                        <div className="relative h-10 w-10 overflow-hidden rounded bg-neutral-200">
+                        <div className="relative h-10 w-10 overflow-hidden rounded bg-surface-hover">
                           {img ? <Image src={img} alt="" fill className="object-cover" /> : null}
                         </div>
                       </td>
-                      <td className="py-2">{row.track.name}</td>
-                      <td className="py-2">{row.track.artists.map((a) => a.name).join(", ")}</td>
-                      <td className="py-2">{playedAt}</td>
+
+                      <td className="py-2 text-text-primary">{row.track.name}</td>
+                      <td className="py-2 text-text-secondary">
+                        {row.track.artists.map((a) => a.name).join(", ")}
+                      </td>
+                      <td className="py-2 text-text-muted">{playedAt}</td>
+
                       <td className="py-2">
                         {url ? (
-                          <a className="underline" href={url} target="_blank" rel="noreferrer">
+                          <a
+                            className="text-accent hover:underline hover:underline-offset-4"
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
                             Open
                           </a>
                         ) : (
-                          "—"
+                          <span className="text-text-muted">—</span>
                         )}
                       </td>
                     </tr>
@@ -233,6 +247,6 @@ export default function HomePage() {
           </div>
         )}
       </section>
-    </main>
+    </div>
   );
 }

@@ -164,7 +164,6 @@ export default function PlaylistsPage() {
   }
 
   async function ensureLoadedUpTo(count: number) {
-    // Ensure we have at least `count` playlists cached (or we reach total).
     if (retryAfter > 0) return;
     if (fetchInFlightRef.current) return;
 
@@ -226,19 +225,16 @@ export default function PlaylistsPage() {
     }
   }
 
-  // initial load
   useEffect(() => {
     loadInitial();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // open drawer when selecting
   useEffect(() => {
     if (!selectedId) return;
     setDrawerOpen(true);
   }, [selectedId]);
 
-  // retry-after countdown
   useEffect(() => {
     if (retryAfter <= 0) return;
     const t = window.setInterval(() => {
@@ -247,7 +243,6 @@ export default function PlaylistsPage() {
     return () => window.clearInterval(t);
   }, [retryAfter]);
 
-  // If user starts searching, fetch remaining pages once so search is global.
   useEffect(() => {
     const q = playlistSearch.trim();
     if (!q) return;
@@ -287,9 +282,6 @@ export default function PlaylistsPage() {
     });
   }, [sortedPlaylists, playlistSearch]);
 
-  // Page count rules:
-  // - No search: use Spotify-reported total (even if not fully loaded yet).
-  // - Search: use filtered length (requires fetching all to be complete).
   const isSearching = playlistSearch.trim().length > 0;
   const totalPages = useMemo(() => {
     const n = isSearching ? filteredPlaylists.length : total;
@@ -298,9 +290,8 @@ export default function PlaylistsPage() {
 
   const currentPage = Math.min(Math.max(page, 1), totalPages);
 
-  // If user navigates to a page we haven't loaded yet (no-search mode), load enough.
   useEffect(() => {
-    if (isSearching) return; // search already triggers ensureAllLoaded
+    if (isSearching) return;
     const needed = currentPage * DISPLAY_PAGE_SIZE;
     ensureLoadedUpTo(needed);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -335,29 +326,27 @@ export default function PlaylistsPage() {
 
     for (let i = start; i <= end; i++) buttons.push(i);
 
-    // Ensure first/last context
     if (!buttons.includes(1)) buttons.unshift(1);
     if (!buttons.includes(totalPages)) buttons.push(totalPages);
 
-    // Deduplicate
     return Array.from(new Set(buttons));
   }, [currentPage, totalPages]);
 
   return (
-    <main className="min-h-[calc(100vh-56px)] bg-zinc-900 text-zinc-100">
+    <main className="min-h-[calc(100vh-56px)] bg-primary text-text-primary">
       <div className="mx-auto max-w-6xl px-6 py-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold">Playlists</h1>
+          <h1 className="text-2xl font-semibold text-text-primary">Playlists</h1>
 
           <div className="flex items-center gap-2">
             <button
               onClick={openSort}
-              className="relative rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm hover:bg-zinc-800/40"
+              className="relative rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
               title="Sort playlists"
             >
               Sort
               {sortMode === "default" ? null : (
-                <span className="ml-2 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-amber-400 px-2 text-xs font-semibold text-black">
+                <span className="ml-2 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-accent px-2 text-xs font-semibold text-white">
                   1
                 </span>
               )}
@@ -365,7 +354,7 @@ export default function PlaylistsPage() {
 
             <button
               onClick={loadInitial}
-              className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm hover:bg-zinc-800/40 disabled:opacity-50"
+              className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)] disabled:opacity-50"
               disabled={loading || loadingMore}
               title="Refresh playlists"
             >
@@ -374,9 +363,9 @@ export default function PlaylistsPage() {
           </div>
         </div>
 
-        {error ? <p className="mt-3 text-sm text-red-300">{error}</p> : null}
+        {error ? <p className="mt-3 text-sm text-red-500">{error}</p> : null}
         {retryAfter > 0 ? (
-          <p className="mt-2 text-xs text-zinc-400">Retry available in {retryAfter}s</p>
+          <p className="mt-2 text-xs text-text-muted">Retry available in {retryAfter}s</p>
         ) : null}
 
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -387,21 +376,21 @@ export default function PlaylistsPage() {
               setPage(1);
             }}
             placeholder="Search playlists…"
-            className="w-full max-w-md rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm outline-none"
+            className="w-full max-w-md rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
           />
 
-          <div className="flex items-center gap-2 text-sm text-zinc-300">
+          <div className="flex items-center gap-2 text-sm text-text-secondary">
             <span>
-              Page <span className="font-semibold text-zinc-100">{currentPage}</span> / {totalPages}
+              Page <span className="font-semibold text-text-primary">{currentPage}</span> / {totalPages}
             </span>
-            {loadingMore ? <span className="text-xs text-zinc-400">Loading…</span> : null}
+            {loadingMore ? <span className="text-xs text-text-muted">Loading…</span> : null}
           </div>
         </div>
 
         {loading ? (
-          <p className="mt-6 text-sm text-zinc-400">Loading…</p>
+          <p className="mt-6 text-sm text-text-muted">Loading…</p>
         ) : filteredPlaylists.length === 0 ? (
-          <p className="mt-6 text-sm text-zinc-400">No playlists found.</p>
+          <p className="mt-6 text-sm text-text-muted">No playlists found.</p>
         ) : (
           <>
             <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
@@ -413,16 +402,18 @@ export default function PlaylistsPage() {
                   <button
                     key={p.id}
                     onClick={() => setSelectedId(p.id)}
-                    className={`group relative overflow-hidden rounded-xl border text-left ${
-                      active ? "border-zinc-600" : "border-zinc-800"
-                    } bg-zinc-950/30 hover:bg-zinc-800/20`}
+                    className={[
+                      "group relative overflow-hidden rounded-xl border text-left transition-colors",
+                      active ? "border-accent" : "border-border",
+                      "bg-surface hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]",
+                    ].join(" ")}
                   >
-                    <div className="relative aspect-square w-full bg-zinc-800">
+                    <div className="relative aspect-square w-full bg-surface-hover">
                       {cover ? <Image src={cover} alt="" fill className="object-cover" /> : null}
                       <PrivacyBadge value={p.public} />
                       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-3">
-                        <div className="truncate text-sm font-semibold">{p.name}</div>
-                        <div className="mt-1 truncate text-xs text-zinc-300">
+                        <div className="truncate text-sm font-semibold text-text-primary">{p.name}</div>
+                        <div className="mt-1 truncate text-xs text-text-secondary">
                           {p.owner?.display_name ? `By ${p.owner.display_name}` : " "}
                         </div>
                       </div>
@@ -432,12 +423,11 @@ export default function PlaylistsPage() {
               })}
             </div>
 
-            {/* Pagination controls */}
             <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
               <button
                 onClick={() => goToPage(currentPage - 1)}
                 disabled={currentPage <= 1 || retryAfter > 0}
-                className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm hover:bg-zinc-800/40 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Prev
               </button>
@@ -447,11 +437,12 @@ export default function PlaylistsPage() {
                   key={p}
                   onClick={() => goToPage(p)}
                   disabled={retryAfter > 0}
-                  className={`rounded-lg border px-3 py-2 text-sm ${
+                  className={[
+                    "rounded-lg border px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
                     p === currentPage
-                      ? "border-zinc-600 bg-zinc-800/40"
-                      : "border-zinc-800 bg-zinc-900/30 hover:bg-zinc-800/40"
-                  } disabled:cursor-not-allowed disabled:opacity-50`}
+                      ? "border-accent bg-surface-hover text-text-primary"
+                      : "border-border bg-surface text-text-primary hover:bg-surface-hover",
+                  ].join(" ")}
                 >
                   {p}
                 </button>
@@ -460,7 +451,7 @@ export default function PlaylistsPage() {
               <button
                 onClick={() => goToPage(currentPage + 1)}
                 disabled={currentPage >= totalPages || retryAfter > 0}
-                className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm hover:bg-zinc-800/40 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Next
               </button>
@@ -469,23 +460,23 @@ export default function PlaylistsPage() {
         )}
       </div>
 
-      {/* Sort modal */}
       {sortOpen ? (
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/50" onClick={closeSort} />
-          <div className="absolute left-1/2 top-1/2 w-[min(720px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
-            <div className="text-2xl font-semibold">Sort your playlists</div>
+          <div className="absolute left-1/2 top-1/2 w-[min(720px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-surface p-6 shadow-2xl">
+            <div className="text-2xl font-semibold text-text-primary">Sort your playlists</div>
 
             <div className="mt-6">
-              <div className="text-sm font-semibold text-zinc-200">Sort by:</div>
+              <div className="text-sm font-semibold text-text-secondary">Sort by:</div>
 
-              <div className="mt-3 space-y-3 text-sm">
+              <div className="mt-3 space-y-3 text-sm text-text-primary">
                 <label className="flex items-center gap-3">
                   <input
                     type="radio"
                     name="sort"
                     checked={sortDraft === "default"}
                     onChange={() => setSortDraft("default")}
+                    className="accent-[var(--accent)]"
                   />
                   Default (custom order)
                 </label>
@@ -496,6 +487,7 @@ export default function PlaylistsPage() {
                     name="sort"
                     checked={sortDraft === "name_asc"}
                     onChange={() => setSortDraft("name_asc")}
+                    className="accent-[var(--accent)]"
                   />
                   Playlist name (A → Z)
                 </label>
@@ -506,6 +498,7 @@ export default function PlaylistsPage() {
                     name="sort"
                     checked={sortDraft === "name_desc"}
                     onChange={() => setSortDraft("name_desc")}
+                    className="accent-[var(--accent)]"
                   />
                   Playlist name (Z → A)
                 </label>
@@ -515,21 +508,21 @@ export default function PlaylistsPage() {
             <div className="mt-8 flex justify-end gap-3">
               <button
                 onClick={() => setSortDraft("default")}
-                className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-4 py-2 text-sm hover:bg-zinc-800/40"
+                className="rounded-lg border border-border bg-surface px-4 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover"
               >
                 Reset
               </button>
 
               <button
                 onClick={closeSort}
-                className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-4 py-2 text-sm hover:bg-zinc-800/40"
+                className="rounded-lg border border-border bg-surface px-4 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover"
               >
                 Cancel
               </button>
 
               <button
                 onClick={applySort}
-                className="rounded-lg bg-zinc-200 px-4 py-2 text-sm font-semibold text-black hover:bg-white"
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent-hover active:bg-accent-pressed focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
               >
                 Apply
               </button>
@@ -538,7 +531,6 @@ export default function PlaylistsPage() {
         </div>
       ) : null}
 
-      {/* Drawer (unchanged simple open link) */}
       <div className={`fixed inset-0 z-40 ${drawerOpen ? "" : "pointer-events-none"}`} aria-hidden={!drawerOpen}>
         <div
           className={`absolute inset-0 bg-black/40 transition-opacity ${drawerOpen ? "opacity-100" : "opacity-0"}`}
@@ -546,20 +538,20 @@ export default function PlaylistsPage() {
         />
 
         <aside
-          className={`absolute right-0 top-0 h-full w-full max-w-md transform border-l border-zinc-800 bg-zinc-950 text-zinc-100 shadow-xl transition-transform ${
+          className={`absolute right-0 top-0 h-full w-full max-w-md transform border-l border-border bg-surface text-text-primary shadow-xl transition-transform ${
             drawerOpen ? "translate-x-0" : "translate-x-full"
           }`}
         >
-          <div className="flex items-center justify-between border-b border-zinc-800 p-4">
+          <div className="flex items-center justify-between border-b border-border p-4">
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold">{selected?.name ?? "Playlist"}</div>
-              <div className="truncate text-xs text-zinc-400">
+              <div className="truncate text-xs text-text-muted">
                 {selected?.owner?.display_name ? `Made by ${selected.owner.display_name}` : " "}
               </div>
             </div>
 
             <button
-              className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-xs hover:bg-zinc-800/40"
+              className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
               onClick={() => setDrawerOpen(false)}
             >
               Close
@@ -567,9 +559,9 @@ export default function PlaylistsPage() {
           </div>
 
           <div className="p-4">
-            <div className="text-xs font-semibold text-zinc-400">OPEN</div>
+            <div className="text-xs font-semibold text-text-muted">OPEN</div>
             <a
-              className="mt-2 block rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm hover:bg-zinc-800/40"
+              className="mt-2 block rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
               href={selected ? `https://open.spotify.com/playlist/${selected.id}` : "#"}
               target="_blank"
               rel="noreferrer"

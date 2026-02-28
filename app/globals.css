@@ -1,36 +1,141 @@
 @import "tailwindcss";
 
+/* =========================
+   SORTED Color System (60–30–10)
+   Primary background (60%):     #0B0F14
+   Secondary surface (30%):      #1F2937
+   Hover/raised surface:         #263244
+   Accent (10%):                 #3B82F6 (hover #2563EB, pressed #1D4ED8)
+   Focus ring:                   rgba(59,130,246,0.45)
+   Text: primary #F8FAFC, secondary #CBD5E1, muted #94A3B8
+   Border/divider:               #334155
+   ========================= */
+
 :root {
-  --background: #18181b;   /* zinc-900 */
-  --foreground: #f4f4f5;   /* zinc-100 */
+  /* Backgrounds / Surfaces */
+  --bg: #0b0f14;
+  --surface: #1f2937;
+  --surface-hover: #263244;
+
+  /* Accent */
   --accent: #3b82f6;
-  --accent-foreground: #ffffff;
+  --accent-hover: #2563eb;
+  --accent-pressed: #1d4ed8;
+  --accent-ring: rgba(59, 130, 246, 0.45);
+
+  /* Text */
+  --text: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+
+  /* Borders */
+  --border: #334155;
 }
 
+/* Tailwind v4 theme tokens
+   This enables Tailwind-friendly classes like:
+   bg-primary, bg-surface, bg-surface-hover,
+   text-text-primary, text-text-secondary, text-text-muted,
+   border-border, text-accent, bg-accent, etc.
+*/
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-primary: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-pressed: var(--accent-pressed);
+
+  --color-text-primary: var(--text);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+
+  --color-border: var(--border);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
+/* Global base */
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* Links */
+a {
+  color: var(--text);
+}
+a:hover {
+  color: var(--text);
+}
+a.link,
+a[data-link="accent"] {
+  color: var(--accent);
+}
+a.link:hover,
+a[data-link="accent"]:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* “Active” nav states you already use */
 a.active,
 .nav-active {
   color: var(--accent);
 }
 
+/* Optional utility helpers (use if you want plain classnames in JSX) */
+.bg-app {
+  background: var(--bg);
+}
+.bg-surface {
+  background: var(--surface);
+}
+.bg-surface-hover:hover {
+  background: var(--surface-hover);
+}
+.border-app {
+  border-color: var(--border);
+}
+
+/* Accent button */
 .btn-accent {
   background: var(--accent);
-  color: var(--accent-foreground);
-  border: 1px solid color-mix(in oklab, var(--accent) 70%, transparent);
+  color: #ffffff;
+  border: 1px solid color-mix(in oklab, var(--accent) 65%, transparent);
 }
 
 .btn-accent:hover {
-  filter: brightness(1.05);
+  background: var(--accent-hover);
+}
+
+.btn-accent:active {
+  background: var(--accent-pressed);
+}
+
+.btn-accent:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 4px var(--accent-ring);
+}
+
+/* Secondary/ghost button */
+.btn-ghost {
+  background: color-mix(in oklab, var(--surface) 30%, transparent);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover {
+  background: color-mix(in oklab, var(--surface-hover) 60%, transparent);
+}
+.btn-ghost:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 4px var(--accent-ring);
 }

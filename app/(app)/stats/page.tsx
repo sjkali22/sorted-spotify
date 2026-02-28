@@ -37,7 +37,7 @@ type AlbumRow = {
   year: string | null;
   totalTracks: number | null;
   imageUrl: string | null;
-  topTracksCount: number; // derived
+  topTracksCount: number;
 };
 
 type GenreRow = {
@@ -173,18 +173,18 @@ export default function StatsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-6xl p-6">
+    <div className="mx-auto max-w-6xl px-6 py-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Stats</h1>
-          <p className="mt-1 text-sm text-neutral-600">
+          <h1 className="text-2xl font-semibold text-text-primary">Stats</h1>
+          <p className="mt-1 text-sm text-text-muted">
             Last updated: {lastUpdated ? lastUpdated.toLocaleString() : "—"}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <button
-            className="rounded-md border px-3 py-2 text-sm"
+            className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)] disabled:opacity-60"
             onClick={onRefresh}
             disabled={loading}
           >
@@ -192,11 +192,11 @@ export default function StatsPage() {
           </button>
 
           <select
-            className="rounded-md border px-3 py-2 text-sm"
+            className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
             value={timeRange}
             onChange={(e) => setTimeRange(e.target.value as TimeRange)}
           >
-            <option value="short_term">4 weeks</option>
+            <option value="short_term">1 month</option>
             <option value="medium_term">6 months</option>
             <option value="long_term">12 months</option>
           </select>
@@ -211,39 +211,48 @@ export default function StatsPage() {
             ["albums", "Top Albums"],
             ["genres", "Top Genres"],
           ] as const
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            className={`rounded-md border px-3 py-2 text-sm ${
-              tab === key ? "bg-neutral-900 text-white" : "text-neutral-700 hover:bg-neutral-50"
-            }`}
-            onClick={() => setTab(key)}
-          >
-            {label}
-          </button>
-        ))}
+        ).map(([key, label]) => {
+          const active = tab === key;
+          return (
+            <button
+              key={key}
+              className={[
+                "rounded-md border px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]",
+                "border-border",
+                active
+                  ? "bg-surface-hover text-text-primary"
+                  : "bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary",
+              ].join(" ")}
+              onClick={() => setTab(key)}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
 
-      {loading && <p className="mt-6 text-sm text-neutral-600">Loading…</p>}
-      {error && <p className="mt-6 text-sm text-red-600">{error}</p>}
+      {loading && <p className="mt-6 text-sm text-text-muted">Loading…</p>}
+      {error && <p className="mt-6 text-sm text-red-500">{error}</p>}
 
-      {/* Artists: image + name + genres */}
+      {/* Artists */}
       {!loading && !error && tab === "artists" && artists && (
         <ol className="mt-6 space-y-3">
           {artists.items.map((a, idx) => {
             const img = pickImage(a.images);
             const topGenres = (a.genres ?? []).slice(0, 3);
+
             return (
-              <li key={a.id} className="rounded-md border p-4">
+              <li key={a.id} className="rounded-md border border-border bg-surface p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="relative h-12 w-12 overflow-hidden rounded-full bg-neutral-200">
+                    <div className="relative h-12 w-12 overflow-hidden rounded-full bg-surface-hover">
                       {img ? <Image src={img} alt={a.name} fill className="object-cover" /> : null}
                     </div>
+
                     <div>
-                      <p className="text-sm text-neutral-500">#{idx + 1}</p>
-                      <p className="font-medium">{a.name}</p>
-                      <p className="text-sm text-neutral-600">
+                      <p className="text-sm text-text-muted">#{idx + 1}</p>
+                      <p className="font-medium text-text-primary">{a.name}</p>
+                      <p className="text-sm text-text-secondary">
                         {topGenres.length > 0 ? topGenres.join(" • ") : "No genres"}
                       </p>
                     </div>
@@ -255,23 +264,25 @@ export default function StatsPage() {
         </ol>
       )}
 
-      {/* Tracks: artwork + track + artists + album */}
+      {/* Tracks */}
       {!loading && !error && tab === "tracks" && tracks && (
         <ol className="mt-6 space-y-3">
           {tracks.items.slice(0, 20).map((t, idx) => {
             const img = pickImage(t.album?.images);
             const albumName = t.album?.name ?? "—";
+
             return (
-              <li key={t.id} className="rounded-md border p-4">
+              <li key={t.id} className="rounded-md border border-border bg-surface p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="relative h-12 w-12 overflow-hidden rounded-md bg-neutral-200">
+                    <div className="relative h-12 w-12 overflow-hidden rounded-md bg-surface-hover">
                       {img ? <Image src={img} alt={t.name} fill className="object-cover" /> : null}
                     </div>
+
                     <div>
-                      <p className="text-sm text-neutral-500">#{idx + 1}</p>
-                      <p className="font-medium">{t.name}</p>
-                      <p className="text-sm text-neutral-600">
+                      <p className="text-sm text-text-muted">#{idx + 1}</p>
+                      <p className="font-medium text-text-primary">{t.name}</p>
+                      <p className="text-sm text-text-secondary">
                         {t.artists?.map((a) => a.name).join(", ")} • {albumName}
                       </p>
                     </div>
@@ -283,20 +294,21 @@ export default function StatsPage() {
         </ol>
       )}
 
-      {/* Albums: year + total tracks + derived count */}
+      {/* Albums */}
       {!loading && !error && tab === "albums" && (
         <ol className="mt-6 space-y-3">
           {albumRows.map((a, idx) => (
-            <li key={a.id} className="rounded-md border p-4">
+            <li key={a.id} className="rounded-md border border-border bg-surface p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="relative h-12 w-12 overflow-hidden rounded-md bg-neutral-200">
+                  <div className="relative h-12 w-12 overflow-hidden rounded-md bg-surface-hover">
                     {a.imageUrl ? <Image src={a.imageUrl} alt={a.name} fill className="object-cover" /> : null}
                   </div>
+
                   <div>
-                    <p className="text-sm text-neutral-500">#{idx + 1}</p>
-                    <p className="font-medium">{a.name}</p>
-                    <p className="text-sm text-neutral-600">
+                    <p className="text-sm text-text-muted">#{idx + 1}</p>
+                    <p className="font-medium text-text-primary">{a.name}</p>
+                    <p className="text-sm text-text-secondary">
                       Year: {a.year ?? "—"} • Tracks: {a.totalTracks ?? "—"} • Top tracks: {a.topTracksCount}
                     </p>
                   </div>
@@ -305,32 +317,28 @@ export default function StatsPage() {
             </li>
           ))}
 
-          {albumRows.length === 0 && (
-            <p className="mt-6 text-sm text-neutral-600">No albums data yet.</p>
-          )}
+          {albumRows.length === 0 && <p className="mt-6 text-sm text-text-muted">No albums data yet.</p>}
         </ol>
       )}
 
-      {/* Genres: artist count only */}
+      {/* Genres */}
       {!loading && !error && tab === "genres" && (
         <ol className="mt-6 space-y-2">
           {genreRows.map((g, idx) => (
-            <li key={g.name} className="rounded-md border p-3">
+            <li key={g.name} className="rounded-md border border-border bg-surface p-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-neutral-500">#{idx + 1}</p>
-                  <p className="font-medium">{g.name}</p>
+                  <p className="text-sm text-text-muted">#{idx + 1}</p>
+                  <p className="font-medium text-text-primary">{g.name}</p>
                 </div>
-                <div className="text-sm text-neutral-600">Artists: {g.artistCount}</div>
+                <div className="text-sm text-text-secondary">Artists: {g.artistCount}</div>
               </div>
             </li>
           ))}
 
-          {genreRows.length === 0 && (
-            <p className="mt-6 text-sm text-neutral-600">No genres data yet.</p>
-          )}
+          {genreRows.length === 0 && <p className="mt-6 text-sm text-text-muted">No genres data yet.</p>}
         </ol>
       )}
-    </main>
+    </div>
   );
 }

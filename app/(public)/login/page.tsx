@@ -1,3 +1,4 @@
+// app/(public)/login/page.tsx
 "use client";
 
 import { signIn, useSession } from "next-auth/react";
@@ -18,18 +19,22 @@ export default function LoginPage() {
   if (status === "loading") return null;
 
   return (
-    <main className="mx-auto max-w-xl p-6">
-      <h1 className="text-2xl font-semibold">Login</h1>
-      <p className="mt-2 text-sm text-neutral-600">
-        Sign in with Spotify to continue.
-      </p>
+    <main className="mx-auto max-w-xl px-6 py-10">
+      <div className="rounded-2xl border border-border bg-surface p-6">
+        <h1 className="text-2xl font-semibold text-text-primary">Login</h1>
+        <p className="mt-2 text-sm text-text-secondary">Sign in with Spotify to continue.</p>
 
-      <button
-        className="mt-6 rounded-md bg-black px-4 py-2 text-white"
-        onClick={() => signIn("spotify", { callbackUrl })}
-      >
-        Continue with Spotify
-      </button>
+        <button
+          className="mt-6 w-full rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent-hover active:bg-accent-pressed focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
+          onClick={() => signIn("spotify", { callbackUrl })}
+        >
+          Continue with Spotify
+        </button>
+
+        <p className="mt-3 text-xs text-text-muted">
+          You&apos;ll be redirected to Spotify to approve access.
+        </p>
+      </div>
     </main>
   );
 }
