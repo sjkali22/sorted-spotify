@@ -19,29 +19,27 @@ function normalizePlaylistId(input: string | undefined) {
 
 export async function GET(
   req: Request,
-  context: { params: Promise<{ playlistID: string }> } // ✅ Next.js 16: params is a Promise
+  ctx: { params: Promise<{ playlistID: string }> }
 ) {
   const session = await getServerSession(authOptions);
 
-  const sessionError = (session as any)?.error as string | undefined;
-  if (sessionError) {
+  if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  if (session.error) {
     return NextResponse.json(
       { error: "Auth token refresh failed. Please sign out and sign in again." },
       { status: 401 }
     );
   }
 
-  const accessToken = (session as any)?.accessToken as string | undefined;
-  if (!accessToken) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
+  const accessToken = session.accessToken;
+  if (!accessToken) return NextResponse.json({ error: "Missing access token" }, { status: 401 });
 
-  const { playlistID: rawFromParams } = await context.params; // ✅ await the Promise
-  const playlistID = normalizePlaylistId(rawFromParams);
+  const { playlistID: raw } = await ctx.params;
+  const playlistID = normalizePlaylistId(raw);
 
   if (!playlistID) {
     return NextResponse.json(
-      { error: `Invalid playlist id received: "${rawFromParams}"` },
+      { error: `Invalid playlist id received: "${String(raw)}"` },
       { status: 400 }
     );
   }
@@ -50,36 +48,24 @@ export async function GET(
   const limit = searchParams.get("limit") ?? "50";
   const offset = searchParams.get("offset") ?? "0";
 
-  const url = `https://api.spotify.com/v1/playlists/${playlistID}/items?limit=${encodeURIComponent(
-    limit
-  )}&offset=${encodeURIComponent(offset)}`;
+  const fields =
+    "items(added_at,is_local,track(uri,name,duration_ms,track_number,artists(name),album(name,release_date))),total,limit,offset,next";
+
+  const url =
+    `https://api.spotify.com/v1/playlists/${playlistID}/tracks` +
+    `?limit=${encodeURIComponent(limit)}` +
+    `&offset=${encodeURIComponent(offset)}` +
+    `&market=from_token` +
+    `&fields=${encodeURIComponent(fields)}`;
 
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
 
-  const data = await res.json().catch(() => ({}));
+  const data = await res.json().catch(() => ({} as any));
 
   if (!res.ok) {
-    if (res.status === 401) {
-      return NextResponse.json(
-        { error: "Spotify token expired. Sign out and sign in again.", spotify: data },
-        { status: 401 }
-      );
-    }
-
-    if (res.status === 403) {
-      return NextResponse.json(
-        {
-          error:
-            "Spotify returned 403 Forbidden for playlist items. This can occur due to access restrictions on playlist contents and/or missing scopes. Try signing out/in again (prompt=consent).",
-          spotify: data,
-        },
-        { status: 403 }
-      );
-    }
-
     return NextResponse.json(
       { error: data?.error?.message ?? "Spotify request failed", spotify: data },
       { status: res.status }

@@ -29,8 +29,55 @@ type PlaylistsApiResponse = {
   retryAfter?: number;
 };
 
+type PlaylistItem = {
+  added_at: string | null;
+  is_local?: boolean;
+  track: {
+    uri: string | null;
+    name: string;
+    duration_ms: number;
+    track_number: number;
+    artists: { name: string }[];
+    album: { name: string; release_date: string };
+  } | null;
+};
+
+type PlaylistItemsResponse = {
+  items: PlaylistItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  next: string | null;
+  error?: string;
+};
+
+type ToolSort =
+  | "track_asc"
+  | "track_desc"
+  | "artist_asc"
+  | "artist_desc"
+  | "album_asc"
+  | "album_desc"
+  | "release_date_asc"
+  | "release_date_desc"
+  | "duration_asc"
+  | "duration_desc"
+  | "track_number_asc"
+  | "track_number_desc"
+  | "date_added_asc"
+  | "date_added_desc";
+
+type TaskStatus = "queued" | "running" | "finished" | "failed";
+type Task = {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  message?: string;
+  progress?: { current: number; total: number };
+};
+
 const DISPLAY_PAGE_SIZE = 25;
-const FETCH_LIMIT = 50; // max Spotify allows for /me/playlists
+const FETCH_LIMIT = 50;
 
 function pickImage(images?: SpotifyImage[]) {
   return images?.[0]?.url ?? "";
@@ -82,6 +129,48 @@ function mergeUniqueById(existing: Playlist[], incoming: Playlist[]) {
   return Array.from(map.values());
 }
 
+function uid() {
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function toCsvRow(cols: string[]) {
+  return cols
+    .map((c) => {
+      const s = String(c ?? "");
+      if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    })
+    .join(",");
+}
+
+function downloadFile(filename: string, text: string, mime: string) {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function normalizeReleaseDate(s: string) {
+  if (!s) return "";
+  if (/^\d{4}$/.test(s)) return `${s}-01-01`;
+  if (/^\d{4}-\d{2}$/.test(s)) return `${s}-01`;
+  return s;
+}
+
+function shuffleArray<T>(arr: T[]) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 export default function PlaylistsPage() {
   const [allPlaylists, setAllPlaylists] = useState<Playlist[]>([]);
   const [total, setTotal] = useState(0);
@@ -102,6 +191,13 @@ export default function PlaylistsPage() {
 
   const [selectedId, setSelectedId] = useState<string>("");
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasksOpen, setTasksOpen] = useState(false);
+
+  const [toolSort, setToolSort] = useState<ToolSort>("track_asc");
+
+  const [diag, setDiag] = useState<{ total: number; playable: number; missing: number; local: number } | null>(null);
 
   const selected = useMemo(
     () => allPlaylists.find((p) => p.id === selectedId) ?? null,
@@ -152,6 +248,7 @@ export default function PlaylistsPage() {
       if (selectedId && !data.items.some((p) => p.id === selectedId)) {
         setSelectedId("");
         setDrawerOpen(false);
+        setDiag(null);
       }
     } catch (e: any) {
       setError(e?.message ?? "Failed to load playlists");
@@ -233,6 +330,7 @@ export default function PlaylistsPage() {
   useEffect(() => {
     if (!selectedId) return;
     setDrawerOpen(true);
+    setDiag(null);
   }, [selectedId]);
 
   useEffect(() => {
@@ -332,6 +430,335 @@ export default function PlaylistsPage() {
     return Array.from(new Set(buttons));
   }, [currentPage, totalPages]);
 
+  function addTask(title: string) {
+    const id = uid();
+    const t: Task = { id, title, status: "queued" };
+    setTasks((s) => [t, ...s]);
+    setTasksOpen(true);
+    return id;
+  }
+
+  function updateTask(id: string, patch: Partial<Task>) {
+    setTasks((s) => s.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+  }
+
+  async function runTask<T>(title: string, fn: (id: string) => Promise<T>) {
+    const id = addTask(title);
+    updateTask(id, { status: "running" });
+    try {
+      const res = await fn(id);
+      updateTask(id, { status: "finished" });
+      return res;
+    } catch (e: any) {
+      updateTask(id, { status: "failed", message: e?.message ?? "Task failed" });
+      throw e;
+    }
+  }
+
+  async function fetchAllPlaylistItems(playlistId: string, taskId?: string) {
+    const all: PlaylistItem[] = [];
+    let offset = 0;
+    let totalItems = 0;
+
+    while (true) {
+      const r = await fetch(`/api/spotify/playlists/${playlistId}/items?limit=50&offset=${offset}`, {
+        cache: "no-store",
+      });
+
+      const body = (await r.json().catch(() => null)) as PlaylistItemsResponse | null;
+
+      if (!r.ok) {
+        const msg = (body as any)?.error ? String((body as any).error) : `Request failed (${r.status})`;
+        throw new Error(msg);
+      }
+
+      const items = body?.items ?? [];
+      totalItems = Number(body?.total ?? totalItems);
+      all.push(...items);
+
+      if (taskId) updateTask(taskId, { progress: { current: all.length, total: totalItems || all.length } });
+
+      if (!body?.next || items.length === 0) break;
+
+      offset += items.length;
+      if (items.length < 50) break;
+    }
+
+    return all;
+  }
+
+  function extractUris(items: PlaylistItem[]) {
+    return items
+      .map((it) => it.track?.uri)
+      .filter((u): u is string => typeof u === "string" && u.length > 0);
+  }
+
+  function computeDiag(items: PlaylistItem[]) {
+    const totalItems = items.length;
+    const local = items.filter((it) => !!it.is_local).length;
+    const playable = items.filter((it) => !!it.track?.uri).length;
+    const missing = totalItems - playable;
+    return { total: totalItems, playable, missing, local };
+  }
+
+  function sortItems(items: PlaylistItem[], mode: ToolSort) {
+    const list = [...items].filter((it) => it.track && it.track.uri);
+
+    const getTrack = (it: PlaylistItem) => it.track!;
+    const getArtist = (it: PlaylistItem) => (getTrack(it).artists?.[0]?.name ?? "").toLowerCase();
+    const getAlbum = (it: PlaylistItem) => (getTrack(it).album?.name ?? "").toLowerCase();
+    const getTrackName = (it: PlaylistItem) => (getTrack(it).name ?? "").toLowerCase();
+    const getRelease = (it: PlaylistItem) => normalizeReleaseDate(getTrack(it).album?.release_date ?? "");
+    const getDuration = (it: PlaylistItem) => Number(getTrack(it).duration_ms ?? 0);
+    const getTrackNumber = (it: PlaylistItem) => Number(getTrack(it).track_number ?? 0);
+    const getAddedAt = (it: PlaylistItem) => it.added_at ?? "";
+
+    const asc = (a: any, b: any) => (a < b ? -1 : a > b ? 1 : 0);
+
+    const comparer = (a: PlaylistItem, b: PlaylistItem) => {
+      switch (mode) {
+        case "track_asc":
+          return asc(getTrackName(a), getTrackName(b));
+        case "track_desc":
+          return -asc(getTrackName(a), getTrackName(b));
+
+        case "artist_asc":
+          return asc(getArtist(a), getArtist(b)) || asc(getTrackName(a), getTrackName(b));
+        case "artist_desc":
+          return -(asc(getArtist(a), getArtist(b)) || asc(getTrackName(a), getTrackName(b)));
+
+        case "album_asc":
+          return asc(getAlbum(a), getAlbum(b)) || asc(getTrackNumber(a), getTrackNumber(b));
+        case "album_desc":
+          return -(asc(getAlbum(a), getAlbum(b)) || asc(getTrackNumber(a), getTrackNumber(b)));
+
+        case "release_date_asc":
+          return asc(getRelease(a), getRelease(b)) || asc(getAlbum(a), getAlbum(b)) || asc(getTrackNumber(a), getTrackNumber(b));
+        case "release_date_desc":
+          return -(asc(getRelease(a), getRelease(b)) || asc(getAlbum(a), getAlbum(b)) || asc(getTrackNumber(a), getTrackNumber(b)));
+
+        case "duration_asc":
+          return asc(getDuration(a), getDuration(b)) || asc(getTrackName(a), getTrackName(b));
+        case "duration_desc":
+          return -(asc(getDuration(a), getDuration(b)) || asc(getTrackName(a), getTrackName(b)));
+
+        case "track_number_asc":
+          return asc(getTrackNumber(a), getTrackNumber(b)) || asc(getAlbum(a), getAlbum(b));
+        case "track_number_desc":
+          return -(asc(getTrackNumber(a), getTrackNumber(b)) || asc(getAlbum(a), getAlbum(b)));
+
+        case "date_added_asc":
+          return asc(getAddedAt(a), getAddedAt(b));
+        case "date_added_desc":
+          return -asc(getAddedAt(a), getAddedAt(b));
+
+        default:
+          return 0;
+      }
+    };
+
+    list.sort(comparer);
+    return list;
+  }
+
+  async function applyOrder(playlistId: string, uris: string[]) {
+    const r = await fetch(`/api/spotify/playlists/${playlistId}/apply-order`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uris }),
+    });
+
+    const body = await r.json().catch(() => null);
+
+    if (!r.ok) {
+      const msg = (body as any)?.error ? String((body as any).error) : `Request failed (${r.status})`;
+      throw new Error(msg);
+    }
+
+    return body as any;
+  }
+
+  async function toolSortApply() {
+    if (!selectedId) return;
+
+    await runTask("Sort playlist", async (taskId) => {
+      const items = await fetchAllPlaylistItems(selectedId, taskId);
+      const d = computeDiag(items);
+      setDiag(d);
+
+      const sorted = sortItems(items, toolSort);
+      const uris = extractUris(sorted);
+
+      if (uris.length === 0) {
+        throw new Error(
+          "No track URIs returned by Spotify for this playlist. This usually means market/relinking restrictions. (Fix: items API must use market=from_token.)"
+        );
+      }
+
+      updateTask(taskId, { message: "Applying changes…" });
+      const res = await applyOrder(selectedId, uris);
+
+      updateTask(taskId, {
+        message: `Completed: sorted ${uris.length} tracks${res?.snapshot_id ? ` • snapshot ${String(res.snapshot_id).slice(0, 8)}…` : ""}`,
+      });
+    });
+  }
+
+  async function toolShuffle() {
+    if (!selectedId) return;
+
+    await runTask("Shuffle playlist", async (taskId) => {
+      const items = await fetchAllPlaylistItems(selectedId, taskId);
+      const d = computeDiag(items);
+      setDiag(d);
+
+      const uris = extractUris(items);
+      if (uris.length === 0) throw new Error("No track URIs returned by Spotify for this playlist.");
+
+      updateTask(taskId, { message: "Applying changes…" });
+      const res = await applyOrder(selectedId, shuffleArray(uris));
+
+      updateTask(taskId, {
+        message: `Completed: shuffled ${uris.length} tracks${res?.snapshot_id ? ` • snapshot ${String(res.snapshot_id).slice(0, 8)}…` : ""}`,
+      });
+    });
+  }
+
+  function uniqueByUriPreserveOrder(uris: string[]) {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const u of uris) {
+      if (seen.has(u)) continue;
+      seen.add(u);
+      out.push(u);
+    }
+    return out;
+  }
+
+  async function toolDedupe() {
+    if (!selectedId) return;
+
+    await runTask("Dedupe playlist", async (taskId) => {
+      const items = await fetchAllPlaylistItems(selectedId, taskId);
+      const d = computeDiag(items);
+      setDiag(d);
+
+      const uris = extractUris(items);
+      if (uris.length === 0) throw new Error("No track URIs returned by Spotify for this playlist.");
+
+      const deduped = uniqueByUriPreserveOrder(uris);
+      const removed = uris.length - deduped.length;
+
+      updateTask(taskId, { message: "Applying changes…" });
+      const res = await applyOrder(selectedId, deduped);
+
+      updateTask(taskId, {
+        message: `Completed: removed ${removed} duplicates • kept ${deduped.length}${res?.snapshot_id ? ` • snapshot ${String(res.snapshot_id).slice(0, 8)}…` : ""}`,
+      });
+    });
+  }
+
+  async function toolRemoveUnavailable() {
+    if (!selectedId) return;
+
+    await runTask("Remove unavailable", async (taskId) => {
+      const items = await fetchAllPlaylistItems(selectedId, taskId);
+      const d = computeDiag(items);
+      setDiag(d);
+
+      const uris = extractUris(items);
+      if (uris.length === 0) throw new Error("No track URIs returned by Spotify for this playlist.");
+
+      updateTask(taskId, { message: "Applying changes…" });
+      const res = await applyOrder(selectedId, uris);
+
+      updateTask(taskId, {
+        message: `Completed: kept ${uris.length} tracks${res?.snapshot_id ? ` • snapshot ${String(res.snapshot_id).slice(0, 8)}…` : ""}`,
+      });
+    });
+  }
+
+  async function toolExportJson() {
+    if (!selectedId) return;
+
+    await runTask("Export JSON", async (taskId) => {
+      const items = await fetchAllPlaylistItems(selectedId, taskId);
+      const d = computeDiag(items);
+      setDiag(d);
+
+      const out = items
+        .map((it) => {
+          const t = it.track;
+          if (!t || !t.uri) return null;
+          return {
+            uri: t.uri,
+            name: t.name,
+            artists: t.artists?.map((a) => a.name) ?? [],
+            album: t.album?.name ?? "",
+            release_date: t.album?.release_date ?? "",
+            duration_ms: t.duration_ms ?? 0,
+            track_number: t.track_number ?? 0,
+            added_at: it.added_at ?? null,
+          };
+        })
+        .filter(Boolean);
+
+      const name = selected?.name ? selected.name.replace(/[\\/:*?"<>|]/g, "-") : selectedId;
+      downloadFile(`${name}.json`, JSON.stringify(out, null, 2), "application/json");
+      updateTask(taskId, { message: `Completed: exported ${out.length} tracks` });
+    });
+  }
+
+  async function toolExportCsv() {
+    if (!selectedId) return;
+
+    await runTask("Export CSV", async (taskId) => {
+      const items = await fetchAllPlaylistItems(selectedId, taskId);
+      const d = computeDiag(items);
+      setDiag(d);
+
+      const rows: string[] = [];
+      rows.push(toCsvRow(["uri", "track", "artists", "album", "release_date", "duration_ms", "track_number", "added_at"]));
+
+      let n = 0;
+      for (const it of items) {
+        const t = it.track;
+        if (!t || !t.uri) continue;
+        n += 1;
+        rows.push(
+          toCsvRow([
+            t.uri,
+            t.name ?? "",
+            (t.artists ?? []).map((a) => a.name).join("; "),
+            t.album?.name ?? "",
+            t.album?.release_date ?? "",
+            String(t.duration_ms ?? 0),
+            String(t.track_number ?? 0),
+            it.added_at ?? "",
+          ])
+        );
+      }
+
+      const name = selected?.name ? selected.name.replace(/[\\/:*?"<>|]/g, "-") : selectedId;
+      downloadFile(`${name}.csv`, rows.join("\n"), "text/csv;charset=utf-8");
+      updateTask(taskId, { message: `Completed: exported ${n} tracks` });
+    });
+  }
+
+  async function refreshDiagnostics() {
+    if (!selectedId) return;
+    try {
+      const r = await fetch(`/api/spotify/playlists/${selectedId}/items?limit=50&offset=0`, { cache: "no-store" });
+      const body = (await r.json().catch(() => null)) as PlaylistItemsResponse | null;
+      const items = body?.items ?? [];
+      setDiag(computeDiag(items));
+    } catch {
+      setDiag(null);
+    }
+  }
+
+  const hasTasks = tasks.length > 0;
+
   return (
     <main className="min-h-[calc(100vh-56px)] bg-primary text-text-primary">
       <div className="mx-auto max-w-6xl px-6 py-6">
@@ -364,9 +791,7 @@ export default function PlaylistsPage() {
         </div>
 
         {error ? <p className="mt-3 text-sm text-red-500">{error}</p> : null}
-        {retryAfter > 0 ? (
-          <p className="mt-2 text-xs text-text-muted">Retry available in {retryAfter}s</p>
-        ) : null}
+        {retryAfter > 0 ? <p className="mt-2 text-xs text-text-muted">Retry available in {retryAfter}s</p> : null}
 
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <input
@@ -409,7 +834,7 @@ export default function PlaylistsPage() {
                     ].join(" ")}
                   >
                     <div className="relative aspect-square w-full bg-surface-hover">
-                      {cover ? <Image src={cover} alt="" fill className="object-cover" /> : null}
+                      {cover ? <Image src={cover} alt="" fill className="object-cover" sizes="(max-width: 1024px) 40vw, 220px" quality={90} /> : null}
                       <PrivacyBadge value={p.public} />
                       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-3">
                         <div className="truncate text-sm font-semibold text-text-primary">{p.name}</div>
@@ -471,52 +896,28 @@ export default function PlaylistsPage() {
 
               <div className="mt-3 space-y-3 text-sm text-text-primary">
                 <label className="flex items-center gap-3">
-                  <input
-                    type="radio"
-                    name="sort"
-                    checked={sortDraft === "default"}
-                    onChange={() => setSortDraft("default")}
-                    className="accent-[var(--accent)]"
-                  />
+                  <input type="radio" name="sort" checked={sortDraft === "default"} onChange={() => setSortDraft("default")} className="accent-[var(--accent)]" />
                   Default (custom order)
                 </label>
 
                 <label className="flex items-center gap-3">
-                  <input
-                    type="radio"
-                    name="sort"
-                    checked={sortDraft === "name_asc"}
-                    onChange={() => setSortDraft("name_asc")}
-                    className="accent-[var(--accent)]"
-                  />
+                  <input type="radio" name="sort" checked={sortDraft === "name_asc"} onChange={() => setSortDraft("name_asc")} className="accent-[var(--accent)]" />
                   Playlist name (A → Z)
                 </label>
 
                 <label className="flex items-center gap-3">
-                  <input
-                    type="radio"
-                    name="sort"
-                    checked={sortDraft === "name_desc"}
-                    onChange={() => setSortDraft("name_desc")}
-                    className="accent-[var(--accent)]"
-                  />
+                  <input type="radio" name="sort" checked={sortDraft === "name_desc"} onChange={() => setSortDraft("name_desc")} className="accent-[var(--accent)]" />
                   Playlist name (Z → A)
                 </label>
               </div>
             </div>
 
             <div className="mt-8 flex justify-end gap-3">
-              <button
-                onClick={() => setSortDraft("default")}
-                className="rounded-lg border border-border bg-surface px-4 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover"
-              >
+              <button onClick={() => setSortDraft("default")} className="rounded-lg border border-border bg-surface px-4 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover">
                 Reset
               </button>
 
-              <button
-                onClick={closeSort}
-                className="rounded-lg border border-border bg-surface px-4 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover"
-              >
+              <button onClick={closeSort} className="rounded-lg border border-border bg-surface px-4 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover">
                 Cancel
               </button>
 
@@ -532,10 +933,7 @@ export default function PlaylistsPage() {
       ) : null}
 
       <div className={`fixed inset-0 z-40 ${drawerOpen ? "" : "pointer-events-none"}`} aria-hidden={!drawerOpen}>
-        <div
-          className={`absolute inset-0 bg-black/40 transition-opacity ${drawerOpen ? "opacity-100" : "opacity-0"}`}
-          onClick={() => setDrawerOpen(false)}
-        />
+        <div className={`absolute inset-0 bg-black/40 transition-opacity ${drawerOpen ? "opacity-100" : "opacity-0"}`} onClick={() => setDrawerOpen(false)} />
 
         <aside
           className={`absolute right-0 top-0 h-full w-full max-w-md transform border-l border-border bg-surface text-text-primary shadow-xl transition-transform ${
@@ -545,9 +943,7 @@ export default function PlaylistsPage() {
           <div className="flex items-center justify-between border-b border-border p-4">
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold">{selected?.name ?? "Playlist"}</div>
-              <div className="truncate text-xs text-text-muted">
-                {selected?.owner?.display_name ? `Made by ${selected.owner.display_name}` : " "}
-              </div>
+              <div className="truncate text-xs text-text-muted">{selected?.owner?.display_name ? `Made by ${selected.owner.display_name}` : " "}</div>
             </div>
 
             <button
@@ -558,19 +954,221 @@ export default function PlaylistsPage() {
             </button>
           </div>
 
-          <div className="p-4">
-            <div className="text-xs font-semibold text-text-muted">OPEN</div>
-            <a
-              className="mt-2 block rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
-              href={selected ? `https://open.spotify.com/playlist/${selected.id}` : "#"}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open on Spotify
-            </a>
+          <div className="p-4 space-y-6">
+            <div>
+              <div className="text-xs font-semibold text-text-muted">OPEN</div>
+              <a
+                className="mt-2 block rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
+                href={selected ? `https://open.spotify.com/playlist/${selected.id}` : "#"}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open on Spotify
+              </a>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold text-text-muted">TRACKS (diagnostic)</div>
+                <button
+                  onClick={refreshDiagnostics}
+                  disabled={!selectedId}
+                  className="rounded-lg border border-border bg-surface px-2 py-1 text-[11px] text-text-primary transition-colors hover:bg-surface-hover disabled:opacity-50"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              <div className="mt-2 rounded-xl border border-border bg-surface p-3 text-xs text-text-secondary">
+                {diag ? (
+                  <div className="space-y-1">
+                    <div>
+                      Total items: <span className="font-semibold text-text-primary">{diag.total}</span>
+                    </div>
+                    <div>
+                      Playable (has uri): <span className="font-semibold text-text-primary">{diag.playable}</span>
+                    </div>
+                    <div>
+                      Missing/blocked: <span className="font-semibold text-text-primary">{diag.missing}</span>
+                    </div>
+                    <div>
+                      Local flagged: <span className="font-semibold text-text-primary">{diag.local}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div>Run a tool or press Refresh to see counts.</div>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold text-text-muted">TOOLS</div>
+
+              <div className="mt-2 rounded-xl border border-border bg-surface p-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={toolShuffle}
+                    disabled={!selectedId || retryAfter > 0}
+                    className="rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Shuffle
+                  </button>
+
+                  <button
+                    onClick={toolDedupe}
+                    disabled={!selectedId || retryAfter > 0}
+                    className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Dedupe
+                  </button>
+
+                  <button
+                    onClick={toolRemoveUnavailable}
+                    disabled={!selectedId || retryAfter > 0}
+                    className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Remove unavailable
+                  </button>
+
+                  <button
+                    onClick={toolExportCsv}
+                    disabled={!selectedId}
+                    className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Export CSV
+                  </button>
+
+                  <button
+                    onClick={toolExportJson}
+                    disabled={!selectedId}
+                    className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Export JSON
+                  </button>
+                </div>
+
+                <div className="mt-3 border-t border-border pt-3">
+                  <div className="text-xs font-semibold text-text-secondary">Sort tracks</div>
+
+                  <div className="mt-2 flex gap-2">
+                    <select
+                      value={toolSort}
+                      onChange={(e) => setToolSort(e.target.value as ToolSort)}
+                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
+                    >
+                      <option value="track_asc">Track name (A → Z)</option>
+                      <option value="track_desc">Track name (Z → A)</option>
+                      <option value="artist_asc">Artist (A → Z)</option>
+                      <option value="artist_desc">Artist (Z → A)</option>
+                      <option value="album_asc">Album (A → Z)</option>
+                      <option value="album_desc">Album (Z → A)</option>
+                      <option value="release_date_asc">Release date (old → new)</option>
+                      <option value="release_date_desc">Release date (new → old)</option>
+                      <option value="duration_asc">Duration (short → long)</option>
+                      <option value="duration_desc">Duration (long → short)</option>
+                      <option value="track_number_asc">Track # (low → high)</option>
+                      <option value="track_number_desc">Track # (high → low)</option>
+                      <option value="date_added_asc">Date added (old → new)</option>
+                      <option value="date_added_desc">Date added (new → old)</option>
+                    </select>
+
+                    <button
+                      onClick={toolSortApply}
+                      disabled={!selectedId || retryAfter > 0}
+                      className="shrink-0 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Sort
+                    </button>
+                  </div>
+
+                  <p className="mt-2 text-[11px] text-text-muted">
+                    After completion, open Spotify and set playlist sort to <span className="font-semibold">Custom order</span> to see reordered tracks.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         </aside>
       </div>
+
+      {hasTasks ? (
+        <>
+          <button
+            onClick={() => setTasksOpen(true)}
+            className="fixed bottom-6 right-6 z-40 rounded-full bg-accent px-4 py-3 text-sm font-semibold text-white shadow-lg transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
+            title="Tasks"
+          >
+            Tasks
+            <span className="ml-2 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-black/25 px-2 text-xs">
+              {tasks.filter((t) => t.status === "running" || t.status === "queued").length}
+            </span>
+          </button>
+
+          {tasksOpen ? (
+            <div className="fixed inset-0 z-50">
+              <div className="absolute inset-0 bg-black/50" onClick={() => setTasksOpen(false)} />
+              <div className="absolute left-1/2 top-1/2 w-[min(760px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-surface p-6 shadow-2xl">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xl font-semibold text-text-primary">Tasks</div>
+                  <button
+                    onClick={() => setTasksOpen(false)}
+                    className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary transition-colors hover:bg-surface-hover"
+                  >
+                    Close
+                  </button>
+                </div>
+
+                <div className="mt-4 max-h-[60vh] overflow-auto rounded-xl border border-border">
+                  {tasks.length === 0 ? (
+                    <div className="p-4 text-sm text-text-muted">No tasks yet.</div>
+                  ) : (
+                    <div className="divide-y divide-border">
+                      {tasks.map((t) => (
+                        <div key={t.id} className="p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-sm font-semibold text-text-primary">{t.title}</div>
+                            <span
+                              className={[
+                                "rounded-full px-2 py-1 text-xs font-semibold",
+                                t.status === "running"
+                                  ? "bg-accent/15 text-text-primary"
+                                  : t.status === "finished"
+                                  ? "bg-green-500/15 text-green-300"
+                                  : t.status === "failed"
+                                  ? "bg-red-500/15 text-red-300"
+                                  : "bg-white/10 text-text-secondary",
+                              ].join(" ")}
+                            >
+                              {t.status}
+                            </span>
+                          </div>
+
+                          {t.progress ? (
+                            <div className="mt-2 text-xs text-text-muted">
+                              {t.progress.current} / {t.progress.total}
+                            </div>
+                          ) : null}
+
+                          {t.message ? <div className="mt-2 text-xs text-text-muted">{t.message}</div> : null}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-4 flex justify-end gap-3">
+                  <button
+                    onClick={() => setTasks([])}
+                    className="rounded-lg border border-border bg-surface px-4 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : null}
     </main>
   );
 }

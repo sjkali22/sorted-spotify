@@ -1,3 +1,5 @@
+// app/api/auth/[...nextauth]/route.ts
+
 import NextAuth, { type NextAuthOptions } from "next-auth";
 import SpotifyProvider from "next-auth/providers/spotify";
 
