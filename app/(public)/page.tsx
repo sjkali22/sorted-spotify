@@ -17,7 +17,7 @@ export default async function LandingPage() {
   if (session) redirect("/home");
 
   return (
-    <main className="min-h-screen bg-primary text-text-primary">
+    <main className="min-h-screen bg-primary text-text-primary font-sans">
       {/* Top nav */}
       <header className="mx-auto max-w-6xl px-6 py-5">
         <div className="flex items-center justify-between">
