@@ -457,11 +457,12 @@ export default function PlaylistsPage() {
 
   async function fetchAllPlaylistItems(playlistId: string, taskId?: string) {
     const all: PlaylistItem[] = [];
+    const limit = 50;
     let offset = 0;
     let totalItems = 0;
 
     while (true) {
-      const r = await fetch(`/api/spotify/playlists/${playlistId}/items?limit=50&offset=${offset}`, {
+      const r = await fetch(`/api/spotify/playlists/${playlistId}/items?limit=${limit}&offset=${offset}`, {
         cache: "no-store",
       });
 
@@ -474,6 +475,17 @@ export default function PlaylistsPage() {
 
       const items = body?.items ?? [];
       totalItems = Number(body?.total ?? totalItems);
+
+      if (items.length > 0 && items.every((it) => !it.track?.uri)) {
+        console.warn("Spotify responded with playlist items but none have a uri", {
+          playlistId,
+          offset,
+          limit,
+          sample: items.slice(0, 3),
+          body,
+        });
+      }
+
       all.push(...items);
 
       if (taskId) updateTask(taskId, { progress: { current: all.length, total: totalItems || all.length } });
@@ -590,9 +602,23 @@ export default function PlaylistsPage() {
       const uris = extractUris(sorted);
 
       if (uris.length === 0) {
-        throw new Error(
+        const sample = items.slice(0, 5).map((it) => ({
+          added_at: it.added_at,
+          is_local: it.is_local,
+          track: it.track
+            ? {
+                name: it.track.name,
+                uri: it.track.uri,
+                id: it.track.uri?.split(":").pop(),
+              }
+            : null,
+        }));
+
+        const error = new Error(
           "No track URIs returned by Spotify for this playlist. This usually means market/relinking restrictions. (Fix: items API must use market=from_token.)"
-        );
+        ) as any;
+        error.sample = sample;
+        throw error;
       }
 
       updateTask(taskId, { message: "Applying changes…" });
@@ -613,7 +639,11 @@ export default function PlaylistsPage() {
       setDiag(d);
 
       const uris = extractUris(items);
-      if (uris.length === 0) throw new Error("No track URIs returned by Spotify for this playlist.");
+      if (uris.length === 0) {
+        throw new Error(
+          `No playable tracks found (found ${d.missing} unavailable / blocked tracks). Try another playlist or remove unavailable tracks first.`
+        );
+      }
 
       updateTask(taskId, { message: "Applying changes…" });
       const res = await applyOrder(selectedId, shuffleArray(uris));
@@ -644,7 +674,11 @@ export default function PlaylistsPage() {
       setDiag(d);
 
       const uris = extractUris(items);
-      if (uris.length === 0) throw new Error("No track URIs returned by Spotify for this playlist.");
+      if (uris.length === 0) {
+        throw new Error(
+          `No playable tracks found (found ${d.missing} unavailable / blocked tracks). Try another playlist or remove unavailable tracks first.`
+        );
+      }
 
       const deduped = uniqueByUriPreserveOrder(uris);
       const removed = uris.length - deduped.length;
@@ -667,7 +701,11 @@ export default function PlaylistsPage() {
       setDiag(d);
 
       const uris = extractUris(items);
-      if (uris.length === 0) throw new Error("No track URIs returned by Spotify for this playlist.");
+      if (uris.length === 0) {
+        throw new Error(
+          `No playable tracks found (found ${d.missing} unavailable / blocked tracks). There is nothing to keep.`
+        );
+      }
 
       updateTask(taskId, { message: "Applying changes…" });
       const res = await applyOrder(selectedId, uris);

@@ -52,7 +52,7 @@ export async function GET(
     "items(added_at,is_local,track(uri,name,duration_ms,track_number,artists(name),album(name,release_date))),total,limit,offset,next";
 
   const url =
-    `https://api.spotify.com/v1/playlists/${playlistID}/tracks` +
+    `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistID)}/items` +
     `?limit=${encodeURIComponent(limit)}` +
     `&offset=${encodeURIComponent(offset)}` +
     `&market=from_token` +
@@ -66,6 +66,13 @@ export async function GET(
   const data = await res.json().catch(() => ({} as any));
 
   if (!res.ok) {
+    // DEBUG: log the Spotify request + returned body so we can inspect what Spotify is receiving
+    console.warn("Spotify playlist items request failed", {
+      url,
+      status: res.status,
+      body: data,
+    });
+
     return NextResponse.json(
       { error: data?.error?.message ?? "Spotify request failed", spotify: data },
       { status: res.status }

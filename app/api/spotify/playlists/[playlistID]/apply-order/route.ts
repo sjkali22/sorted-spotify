@@ -1,45 +1,47 @@
-import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
-function chunk<T>(arr: T[], size: number) {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
+function normalizePlaylistId(input: string | undefined) {
+  if (!input) return null;
+
+  const urlMatch = input.match(/open\.spotify\.com\/playlist\/([0-9A-Za-z]+)/);
+  if (urlMatch?.[1]) return urlMatch[1];
+
+  const uriMatch = input.match(/^spotify:playlist:([0-9A-Za-z]+)$/);
+  if (uriMatch?.[1]) return uriMatch[1];
+
+  if (/^[0-9A-Za-z]+$/.test(input)) return input;
+
+  return null;
+}
+
+function getAccessToken(session: unknown): string | null {
+  const s = session as
+    | {
+        accessToken?: string;
+        user?: { accessToken?: string; token?: string };
+        error?: string;
+      }
+    | undefined;
+
+  return s?.accessToken ?? s?.user?.accessToken ?? s?.user?.token ?? null;
 }
 
 async function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function getAccessToken(session: any): string | null {
-  return (
-    session?.accessToken || // if you extended Session
-    session?.user?.accessToken || // if you store on user
-    session?.user?.token || // fallback if you named it differently
-    null
-  );
-}
-
-async function fetchSpotifyWithRetry(
-  url: string,
-  accessToken: string,
-  init: RequestInit,
-  maxRetries = 3
-): Promise<Response> {
+async function spotifyFetchWithRetry(url: string, accessToken: string, maxRetries = 3) {
   let attempt = 0;
 
   while (true) {
     const res = await fetch(url, {
-      ...init,
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        ...(init.headers || {}),
-      },
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
     });
 
     if (res.status !== 429) return res;
-
     if (attempt >= maxRetries) return res;
 
     const retryAfter = Number(res.headers.get("retry-after") ?? "1");
@@ -48,79 +50,75 @@ async function fetchSpotifyWithRetry(
   }
 }
 
-export async function POST(req: Request, context: { params: { playlistID: string } }) {
+export async function GET(
+  req: Request,
+  ctx: { params: Promise<{ playlistID: string }> }
+) {
   const session = await getServerSession(authOptions);
   const accessToken = getAccessToken(session);
 
-  if (!accessToken) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session || !accessToken) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const playlistID = context?.params?.playlistID;
-  if (!playlistID) {
-    return NextResponse.json({ error: "Missing playlistID" }, { status: 400 });
-  }
-
-  const body = (await req.json().catch(() => ({}))) as { uris?: string[] };
-  const uris = body.uris;
-
-  if (!Array.isArray(uris) || uris.length === 0) {
-    return NextResponse.json({ error: "Missing uris[]" }, { status: 400 });
-  }
-
-  const chunks = chunk(uris, 100);
-  let lastSnapshotId: string | null = null;
-
-  // 1) Replace playlist items with first chunk
-  const replaceRes = await fetchSpotifyWithRetry(
-    `https://api.spotify.com/v1/playlists/${playlistID}/tracks`,
-    accessToken,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uris: chunks[0] }),
-    }
-  );
-
-  if (!replaceRes.ok) {
-    const text = await replaceRes.text().catch(() => "");
+  if ((session as { error?: string }).error) {
     return NextResponse.json(
-      { error: "Failed to replace playlist items", status: replaceRes.status, details: text },
-      { status: 500 }
+      { error: "Auth token refresh failed. Please sign out and sign in again." },
+      { status: 401 }
     );
   }
 
-  const replaceJson = (await replaceRes.json().catch(() => null)) as { snapshot_id?: string } | null;
-  lastSnapshotId = replaceJson?.snapshot_id ?? lastSnapshotId;
+  const { playlistID: raw } = await ctx.params;
+  const playlistID = normalizePlaylistId(raw);
 
-  // 2) Append remaining chunks
-  for (let i = 1; i < chunks.length; i += 1) {
-    const addRes = await fetchSpotifyWithRetry(
-      `https://api.spotify.com/v1/playlists/${playlistID}/tracks`,
-      accessToken,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uris: chunks[i] }),
-      }
+  if (!playlistID) {
+    return NextResponse.json(
+      { error: `Invalid playlist id received: "${String(raw)}"` },
+      { status: 400 }
     );
+  }
 
-    if (!addRes.ok) {
-      const text = await addRes.text().catch(() => "");
-      return NextResponse.json(
-        { error: "Failed to append playlist items", status: addRes.status, details: text },
-        { status: 500 }
-      );
-    }
+  const { searchParams } = new URL(req.url);
+  const limitValue = Number(searchParams.get("limit") ?? "50");
+  const offsetValue = Number(searchParams.get("offset") ?? "0");
 
-    const addJson = (await addRes.json().catch(() => null)) as { snapshot_id?: string } | null;
-    lastSnapshotId = addJson?.snapshot_id ?? lastSnapshotId;
+  const limit = Number.isFinite(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 50;
+  const offset = Number.isFinite(offsetValue) ? Math.max(offsetValue, 0) : 0;
+
+  const fields =
+    "items(added_at,is_local,track(uri,name,duration_ms,track_number,artists(name),album(name,release_date))),total,limit,offset,next";
+
+  const spotifyUrl =
+    `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistID)}/items` +
+    `?limit=${limit}` +
+    `&offset=${offset}` +
+    `&market=from_token` +
+    `&fields=${encodeURIComponent(fields)}`;
+
+  const res = await spotifyFetchWithRetry(spotifyUrl, accessToken);
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    return NextResponse.json(
+      {
+        error:
+          (data as any)?.error?.message ||
+          (data as any)?.message ||
+          "Spotify request failed",
+        spotify: data,
+        playlistID,
+        limit,
+        offset,
+      },
+      { status: res.status }
+    );
   }
 
   return NextResponse.json({
-    ok: true,
-    total: uris.length,
-    requests: chunks.length,
-    snapshot_id: lastSnapshotId,
+    items: Array.isArray((data as any)?.items) ? (data as any).items : [],
+    total: Number((data as any)?.total ?? 0),
+    limit: Number((data as any)?.limit ?? limit),
+    offset: Number((data as any)?.offset ?? offset),
+    next: typeof (data as any)?.next === "string" ? (data as any).next : null,
   });
 }

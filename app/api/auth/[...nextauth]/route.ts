@@ -1,17 +1,15 @@
-// app/api/auth/[...nextauth]/route.ts
-
 import NextAuth, { type NextAuthOptions } from "next-auth";
 import SpotifyProvider from "next-auth/providers/spotify";
 
-type SpotifyToken = {
+type SpotifyJWT = {
   accessToken?: string;
   refreshToken?: string;
-  accessTokenExpires?: number; // ms epoch
+  accessTokenExpires?: number;
   scope?: string;
   error?: "RefreshAccessTokenError";
-};
+} & Record<string, unknown>;
 
-const scope = [
+const spotifyScope = [
   "user-read-email",
   "user-read-private",
   "user-top-read",
@@ -24,15 +22,22 @@ const scope = [
   "playlist-modify-private",
 ].join(" ");
 
-async function refreshSpotifyAccessToken(token: SpotifyToken): Promise<SpotifyToken> {
+async function refreshSpotifyAccessToken(token: SpotifyJWT): Promise<SpotifyJWT> {
   try {
-    if (!token.refreshToken) return { ...token, error: "RefreshAccessTokenError" };
+    if (!token.refreshToken) {
+      return { ...token, error: "RefreshAccessTokenError" };
+    }
 
-    const basicAuth = Buffer.from(
-      `${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`
-    ).toString("base64");
+    const clientId = process.env.SPOTIFY_CLIENT_ID ?? "";
+    const clientSecret = process.env.SPOTIFY_CLIENT_SECRET ?? "";
 
-    const res = await fetch("https://accounts.spotify.com/api/token", {
+    if (!clientId || !clientSecret) {
+      return { ...token, error: "RefreshAccessTokenError" };
+    }
+
+    const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+
+    const response = await fetch("https://accounts.spotify.com/api/token", {
       method: "POST",
       headers: {
         Authorization: `Basic ${basicAuth}`,
@@ -40,12 +45,23 @@ async function refreshSpotifyAccessToken(token: SpotifyToken): Promise<SpotifyTo
       },
       body: new URLSearchParams({
         grant_type: "refresh_token",
-        refresh_token: token.refreshToken,
+        refresh_token: String(token.refreshToken),
       }),
+      cache: "no-store",
     });
 
-    const refreshed = await res.json();
-    if (!res.ok) throw refreshed;
+    const refreshed = (await response.json().catch(() => null)) as
+      | {
+          access_token?: string;
+          refresh_token?: string;
+          expires_in?: number;
+          scope?: string;
+        }
+      | null;
+
+    if (!response.ok || !refreshed?.access_token) {
+      return { ...token, error: "RefreshAccessTokenError" };
+    }
 
     return {
       ...token,
@@ -62,63 +78,102 @@ async function refreshSpotifyAccessToken(token: SpotifyToken): Promise<SpotifyTo
 
 export const authOptions: NextAuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
-  pages: { signIn: "/login" },
+  session: {
+    strategy: "jwt",
+  },
+  pages: {
+    signIn: "/login",
+  },
   providers: [
     SpotifyProvider({
       clientId: process.env.SPOTIFY_CLIENT_ID ?? "",
       clientSecret: process.env.SPOTIFY_CLIENT_SECRET ?? "",
       authorization: {
         params: {
-          scope,
-          prompt: "consent",
+          scope: spotifyScope,
           show_dialog: "true",
+          prompt: "consent",
         },
       },
     }),
   ],
   callbacks: {
     async jwt({ token, account }) {
-      const t = token as SpotifyToken;
+      const currentToken = token as SpotifyJWT;
 
-      // Initial sign-in
       if (account) {
+        const accessToken =
+          typeof account.access_token === "string" ? account.access_token : undefined;
+
+        const refreshToken =
+          typeof account.refresh_token === "string" ? account.refresh_token : undefined;
+
+        const expiresAtSeconds =
+          typeof account.expires_at === "number" ? account.expires_at : undefined;
+
+        const scope =
+          typeof account.scope === "string" ? account.scope : currentToken.scope;
+
         return {
-          ...token, // ✅ preserve existing NextAuth fields (sub, name, email, etc.)
-          accessToken: (account as any).access_token,
-          refreshToken: (account as any).refresh_token,
-          accessTokenExpires:
-            typeof (account as any).expires_at === "number"
-              ? (account as any).expires_at * 1000
-              : Date.now() + 3600 * 1000,
-          scope: (account as any).scope,
+          ...token,
+          accessToken,
+          refreshToken,
+          accessTokenExpires: expiresAtSeconds
+            ? expiresAtSeconds * 1000
+            : Date.now() + 3600 * 1000,
+          scope,
           error: undefined,
-        } satisfies SpotifyToken;
+        };
       }
 
-      // If we still have a valid access token, return it
-      if (typeof t.accessTokenExpires === "number" && Date.now() < t.accessTokenExpires) {
-        return token;
+      if (
+        typeof currentToken.accessToken === "string" &&
+        typeof currentToken.accessTokenExpires === "number" &&
+        Date.now() < currentToken.accessTokenExpires
+      ) {
+        return currentToken;
       }
 
-      // Otherwise, refresh
-      return refreshSpotifyAccessToken(t);
+      return refreshSpotifyAccessToken(currentToken);
     },
 
     async session({ session, token }) {
-      const t = token as SpotifyToken;
-      (session as any).accessToken = t.accessToken;
-      (session as any).scope = t.scope;
-      (session as any).error = t.error;
+      const spotifyToken = token as SpotifyJWT;
+
+      (session as typeof session & {
+        accessToken?: string;
+        scope?: string;
+        error?: "RefreshAccessTokenError";
+      }).accessToken = spotifyToken.accessToken;
+
+      (session as typeof session & {
+        accessToken?: string;
+        scope?: string;
+        error?: "RefreshAccessTokenError";
+      }).scope = spotifyToken.scope;
+
+      (session as typeof session & {
+        accessToken?: string;
+        scope?: string;
+        error?: "RefreshAccessTokenError";
+      }).error = spotifyToken.error;
+
       return session;
     },
 
     async redirect({ url, baseUrl }) {
       if (url.startsWith("/")) return `${baseUrl}${url}`;
-      if (new URL(url).origin === baseUrl) return url;
+
+      try {
+        const parsed = new URL(url);
+        if (parsed.origin === baseUrl) return url;
+      } catch {}
+
       return `${baseUrl}/home`;
     },
   },
 };
 
 const handler = NextAuth(authOptions);
+
 export { handler as GET, handler as POST };
