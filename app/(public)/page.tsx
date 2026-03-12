@@ -1,4 +1,4 @@
-// app/(public)/page.tsx
+﻿// app/(public)/page.tsx
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
@@ -131,18 +131,18 @@ export default async function LandingPage() {
         </div>
 
         <div className="mt-8 grid gap-4 md:grid-cols-3">
-          <div className="rounded-2xl border border-border bg-surface p-6">
-            <div className="text-sm font-semibold text-text-primary">1) Sign in</div>
+          <div className="rounded-2xl border border-border bg-surface p-6 text-center">
+            <div className="text-sm font-semibold text-text-primary">Sign in</div>
             <p className="mt-2 text-sm text-text-secondary">Connect your Spotify account securely.</p>
           </div>
 
-          <div className="rounded-2xl border border-border bg-surface p-6">
-            <div className="text-sm font-semibold text-text-primary">2) Choose</div>
+          <div className="rounded-2xl border border-border bg-surface p-6 text-center">
+            <div className="text-sm font-semibold text-text-primary">Choose</div>
             <p className="mt-2 text-sm text-text-secondary">Pick a playlist.</p>
           </div>
 
-          <div className="rounded-2xl border border-border bg-surface p-6">
-            <div className="text-sm font-semibold text-text-primary">3) Apply</div>
+          <div className="rounded-2xl border border-border bg-surface p-6 text-center">
+            <div className="text-sm font-semibold text-text-primary">Apply</div>
             <p className="mt-2 text-sm text-text-secondary">Run tools with preview + safe changes.</p>
           </div>
         </div>
@@ -175,20 +175,10 @@ export default async function LandingPage() {
               Privacy note: SORTED uses Spotify authentication and only accesses data needed for app features.
             </div>
 
-            <div className="flex items-center gap-4 text-sm">
-              <Link href="/privacy" className="text-text-secondary transition-colors hover:text-text-primary">
-                Privacy
-              </Link>
-              <Link href="/about" className="text-text-secondary transition-colors hover:text-text-primary">
-                About
-              </Link>
-              <a href="mailto:contact@sorted.app" className="text-text-secondary transition-colors hover:text-text-primary">
-                Contact
-              </a>
+            <div className="text-sm text-text-secondary">
+              © {new Date().getFullYear()} SORTED
             </div>
           </div>
-
-          <div className="mt-4 text-xs text-text-muted">© {new Date().getFullYear()} SORTED</div>
         </div>
       </footer>
     </main>
