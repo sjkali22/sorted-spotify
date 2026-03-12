@@ -1,11 +1,11 @@
 // app/(public)/login/page.tsx
 "use client";
 
+import { Suspense, useEffect } from "react";
 import { signIn, useSession } from "next-auth/react";
-import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-export default function LoginPage() {
+function LoginPageContent() {
   const { status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -36,5 +36,24 @@ export default function LoginPage() {
         </p>
       </div>
     </main>
+  );
+}
+
+function LoginFallback() {
+  return (
+    <main className="mx-auto max-w-xl px-6 py-10">
+      <div className="rounded-2xl border border-border bg-surface p-6">
+        <h1 className="text-2xl font-semibold text-text-primary">Login</h1>
+        <p className="mt-2 text-sm text-text-secondary">Loading sign-in options...</p>
+      </div>
+    </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginFallback />}>
+      <LoginPageContent />
+    </Suspense>
   );
 }

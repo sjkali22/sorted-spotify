@@ -1,7 +1,16 @@
 "use client";
 
 import Image from "next/image";
+import type { Session } from "next-auth";
 import { signOut, useSession } from "next-auth/react";
+
+type SettingsSession = Session & {
+  spotifyUserId?: string;
+  user?: Session["user"] & {
+    id?: string;
+    spotifyId?: string;
+  };
+};
 
 function initialsOf(name: string | null | undefined) {
   if (!name) return "S";
@@ -13,15 +22,16 @@ function initialsOf(name: string | null | undefined) {
 
 export default function SettingsPage() {
   const { data: session, status } = useSession();
+  const typedSession = session as SettingsSession | null;
 
   const spotifyUserId =
-    (session as any)?.spotifyUserId ??
-    (session as any)?.user?.id ??
-    (session as any)?.user?.spotifyId ??
-    "—";
+    typedSession?.spotifyUserId ??
+    typedSession?.user?.id ??
+    typedSession?.user?.spotifyId ??
+    "-";
 
-  const displayName = session?.user?.name ?? "—";
-  const email = session?.user?.email ?? "—";
+  const displayName = session?.user?.name ?? "â€”";
+  const email = session?.user?.email ?? "â€”";
   const profileImage = session?.user?.image ?? null;
 
   const sessionLabel =

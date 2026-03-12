@@ -29,6 +29,7 @@ type TopTrack = {
 
 type TopArtistsResponse = { items: TopArtist[] };
 type TopTracksResponse = { items: TopTrack[] };
+type ApiErrorResponse = { error?: string };
 
 type AlbumRow = {
   id: string;
@@ -47,6 +48,19 @@ function pickLargeImage(images?: SpotifyImage[]) {
 function formatYear(releaseDate?: string) {
   if (!releaseDate) return null;
   return releaseDate.slice(0, 4) || null;
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
+
+function getApiErrorMessage(data: unknown, fallback: string) {
+  if (data && typeof data === "object" && "error" in data && typeof data.error === "string") {
+    return data.error;
+  }
+
+  return fallback;
 }
 
 export default function StatsPage() {
@@ -85,19 +99,23 @@ export default function StatsPage() {
           fetch(tracksUrl, { cache: "no-store" }),
         ]);
 
-        const artistsData = await artistsRes.json();
-        if (!artistsRes.ok) throw new Error(artistsData?.error ?? `Artists request failed (${artistsRes.status})`);
+        const artistsData = (await artistsRes.json()) as TopArtistsResponse | ApiErrorResponse;
+        if (!artistsRes.ok) {
+          throw new Error(getApiErrorMessage(artistsData, `Artists request failed (${artistsRes.status})`));
+        }
 
-        const tracksData = await tracksRes.json();
-        if (!tracksRes.ok) throw new Error(tracksData?.error ?? `Tracks request failed (${tracksRes.status})`);
+        const tracksData = (await tracksRes.json()) as TopTracksResponse | ApiErrorResponse;
+        if (!tracksRes.ok) {
+          throw new Error(getApiErrorMessage(tracksData, `Tracks request failed (${tracksRes.status})`));
+        }
 
         if (!cancelled) {
-          setArtists(artistsData);
-          setTracks(tracksData);
+          setArtists(artistsData as TopArtistsResponse);
+          setTracks(tracksData as TopTracksResponse);
           setLastUpdated(new Date());
         }
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message ?? "Failed to load stats");
+      } catch (error: unknown) {
+        if (!cancelled) setError(getErrorMessage(error, "Failed to load stats"));
       } finally {
         if (!cancelled) setLoading(false);
       }

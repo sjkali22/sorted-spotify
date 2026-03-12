@@ -29,17 +29,22 @@ type PlaylistsApiResponse = {
   retryAfter?: number;
 };
 
+type PlaylistEntryType = "track" | "episode";
+
+type PlaylistEntry = {
+  type: PlaylistEntryType;
+  uri: string | null;
+  name: string;
+  duration_ms: number;
+  track_number: number;
+  artists: { name: string }[];
+  album: { name: string; release_date: string };
+};
+
 type PlaylistItem = {
   added_at: string | null;
   is_local?: boolean;
-  track: {
-    uri: string | null;
-    name: string;
-    duration_ms: number;
-    track_number: number;
-    artists: { name: string }[];
-    album: { name: string; release_date: string };
-  } | null;
+  track: PlaylistEntry | null;
 };
 
 type PlaylistItemsResponse = {
@@ -74,6 +79,18 @@ type Task = {
   status: TaskStatus;
   message?: string;
   progress?: { current: number; total: number };
+};
+
+type ApiErrorResponse = {
+  error?: string;
+  retryAfter?: number;
+};
+
+type ApplyOrderResponse = {
+  ok?: boolean;
+  snapshot_id?: string | null;
+  total?: number;
+  error?: string;
 };
 
 const DISPLAY_PAGE_SIZE = 25;
@@ -171,6 +188,72 @@ function shuffleArray<T>(arr: T[]) {
   return a;
 }
 
+function isPlaylistItemUri(uri: string) {
+  return uri.startsWith("spotify:track:") || uri.startsWith("spotify:episode:");
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message;
+  return "Task failed";
+}
+
+function getActionableUri(item: PlaylistItem) {
+  const uri = item.track?.uri;
+  if (item.is_local) return null;
+  if (typeof uri !== "string") return null;
+  return isPlaylistItemUri(uri) ? uri : null;
+}
+
+function extractUris(items: PlaylistItem[]) {
+  return items
+    .map(getActionableUri)
+    .filter((uri): uri is string => typeof uri === "string");
+}
+
+function getMutationSafety(items: PlaylistItem[]) {
+  const uris = extractUris(items);
+  const local = items.filter((item) => item.is_local).length;
+  const blocked = items.filter((item) => !getActionableUri(item)).length - local;
+
+  return {
+    uris,
+    local,
+    blocked: Math.max(blocked, 0),
+  };
+}
+
+function ensureSafeMutation(action: string, items: PlaylistItem[]) {
+  const safety = getMutationSafety(items);
+
+  if (safety.uris.length === 0) {
+    throw new Error(
+      `${action} is blocked because this playlist does not contain any Spotify track or episode items that can be safely rewritten.`
+    );
+  }
+
+  if (safety.local > 0 || safety.blocked > 0) {
+    const parts: string[] = [];
+
+    if (safety.local > 0) {
+      parts.push(`${safety.local} local item${safety.local === 1 ? "" : "s"}`);
+    }
+
+    if (safety.blocked > 0) {
+      parts.push(
+        `${safety.blocked} unavailable or unsupported item${safety.blocked === 1 ? "" : "s"}`
+      );
+    }
+
+    throw new Error(
+      `${action} is blocked because this playlist contains ${parts.join(
+        " and "
+      )}. To avoid silently removing them, SORTED will not rewrite the playlist until those items are handled first.`
+    );
+  }
+
+  return safety.uris;
+}
+
 export default function PlaylistsPage() {
   const [allPlaylists, setAllPlaylists] = useState<Playlist[]>([]);
   const [total, setTotal] = useState(0);
@@ -191,6 +274,7 @@ export default function PlaylistsPage() {
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tasksOpen, setTasksOpen] = useState(false);
+  const [mutationRunning, setMutationRunning] = useState(false);
 
   const [toolSort, setToolSort] = useState<ToolSort>("track_asc");
 
@@ -202,26 +286,27 @@ export default function PlaylistsPage() {
   );
 
   const fetchInFlightRef = useRef(false);
+  const mutationInFlightRef = useRef(false);
 
   async function fetchPlaylistsChunk(offset: number) {
     const r = await fetch(`/api/spotify/playlists?limit=${FETCH_LIMIT}&offset=${offset}`, {
       cache: "no-store",
     });
 
-    let body: PlaylistsApiResponse | null = null;
+    let body: PlaylistsApiResponse | ApiErrorResponse | null = null;
     try {
-      body = (await r.json()) as PlaylistsApiResponse;
+      body = (await r.json()) as PlaylistsApiResponse | ApiErrorResponse;
     } catch {
       body = null;
     }
 
     if (!r.ok) {
-      const ra = Number((body as any)?.retryAfter ?? 0);
+      const ra = Number(body?.retryAfter ?? 0);
       if (r.status === 429 && ra > 0) {
         setRetryAfter(ra);
         throw new Error(`Rate limited. Try again in ${ra}s.`);
       }
-      const msg = (body as any)?.error ? String((body as any).error) : `Request failed (${r.status})`;
+      const msg = body?.error ? String(body.error) : `Request failed (${r.status})`;
       throw new Error(msg);
     }
 
@@ -247,8 +332,8 @@ export default function PlaylistsPage() {
         setDrawerOpen(false);
         setDiag(null);
       }
-    } catch (e: any) {
-      setError(e?.message ?? "Failed to load playlists");
+    } catch (error: unknown) {
+      setError(getErrorMessage(error));
       setAllPlaylists([]);
       setTotal(0);
     } finally {
@@ -280,8 +365,8 @@ export default function PlaylistsPage() {
 
         if (!data.next) break;
       }
-    } catch (e: any) {
-      setError(e?.message ?? "Failed to load more playlists");
+    } catch (error: unknown) {
+      setError(getErrorMessage(error));
     } finally {
       setLoadingMore(false);
       fetchInFlightRef.current = false;
@@ -311,8 +396,8 @@ export default function PlaylistsPage() {
 
         if (!data.next) break;
       }
-    } catch (e: any) {
-      setError(e?.message ?? "Failed to load all playlists");
+    } catch (error: unknown) {
+      setError(getErrorMessage(error));
     } finally {
       setLoadingMore(false);
       fetchInFlightRef.current = false;
@@ -434,9 +519,29 @@ export default function PlaylistsPage() {
       const res = await fn(id);
       updateTask(id, { status: "finished" });
       return res;
-    } catch (e: any) {
-      updateTask(id, { status: "failed", message: e?.message ?? "Task failed" });
-      throw e;
+    } catch (error: unknown) {
+      updateTask(id, { status: "failed", message: getErrorMessage(error) });
+      throw error;
+    }
+  }
+
+  async function runMutationTask(title: string, fn: (id: string) => Promise<void>) {
+    if (mutationInFlightRef.current) {
+      setError("Another playlist change is already running. Wait for it to finish.");
+      return;
+    }
+
+    mutationInFlightRef.current = true;
+    setMutationRunning(true);
+    setError("");
+
+    try {
+      await runTask(title, fn);
+    } catch (error: unknown) {
+      setError(getErrorMessage(error));
+    } finally {
+      mutationInFlightRef.current = false;
+      setMutationRunning(false);
     }
   }
 
@@ -451,15 +556,16 @@ export default function PlaylistsPage() {
         cache: "no-store",
       });
 
-      const body = (await r.json().catch(() => null)) as PlaylistItemsResponse | null;
+      const body = (await r.json().catch(() => null)) as PlaylistItemsResponse | ApiErrorResponse | null;
 
       if (!r.ok) {
-        const msg = (body as any)?.error ? String((body as any).error) : `Request failed (${r.status})`;
+        const msg = body?.error ? String(body.error) : `Request failed (${r.status})`;
         throw new Error(msg);
       }
 
-      const items = body?.items ?? [];
-      totalItems = Number(body?.total ?? totalItems);
+      const page = body as PlaylistItemsResponse | null;
+      const items = page?.items ?? [];
+      totalItems = Number(page?.total ?? totalItems);
 
       if (items.length > 0 && items.every((it) => !it.track?.uri)) {
         console.warn("Spotify responded with playlist items but none have a uri", {
@@ -475,7 +581,7 @@ export default function PlaylistsPage() {
 
       if (taskId) updateTask(taskId, { progress: { current: all.length, total: totalItems || all.length } });
 
-      if (!body?.next || items.length === 0) break;
+      if (!page?.next || items.length === 0) break;
 
       offset += items.length;
       if (items.length < 50) break;
@@ -484,22 +590,16 @@ export default function PlaylistsPage() {
     return all;
   }
 
-  function extractUris(items: PlaylistItem[]) {
-    return items
-      .map((it) => it.track?.uri)
-      .filter((u): u is string => typeof u === "string" && u.length > 0);
-  }
-
   function computeDiag(items: PlaylistItem[]) {
     const totalItems = items.length;
     const local = items.filter((it) => !!it.is_local).length;
-    const playable = items.filter((it) => !!it.track?.uri).length;
+    const playable = items.filter((it) => !!getActionableUri(it)).length;
     const missing = totalItems - playable;
     return { total: totalItems, playable, missing, local };
   }
 
   function sortItems(items: PlaylistItem[], mode: ToolSort) {
-    const list = [...items].filter((it) => it.track && it.track.uri);
+    const list = [...items].filter((it) => !!getActionableUri(it));
 
     const getTrack = (it: PlaylistItem) => it.track!;
     const getArtist = (it: PlaylistItem) => (getTrack(it).artists?.[0]?.name ?? "").toLowerCase();
@@ -510,7 +610,7 @@ export default function PlaylistsPage() {
     const getTrackNumber = (it: PlaylistItem) => Number(getTrack(it).track_number ?? 0);
     const getAddedAt = (it: PlaylistItem) => it.added_at ?? "";
 
-    const asc = (a: any, b: any) => (a < b ? -1 : a > b ? 1 : 0);
+    const asc = <T extends number | string>(a: T, b: T) => (a < b ? -1 : a > b ? 1 : 0);
 
     const comparer = (a: PlaylistItem, b: PlaylistItem) => {
       switch (mode) {
@@ -565,52 +665,37 @@ export default function PlaylistsPage() {
       body: JSON.stringify({ uris }),
     });
 
-    const body = await r.json().catch(() => null);
+    const body = (await r.json().catch(() => null)) as ApplyOrderResponse | ApiErrorResponse | null;
 
     if (!r.ok) {
-      const msg = (body as any)?.error ? String((body as any).error) : `Request failed (${r.status})`;
+      const msg = body?.error ? String(body.error) : `Request failed (${r.status})`;
       throw new Error(msg);
     }
 
-    return body as any;
+    return body as ApplyOrderResponse;
   }
 
   async function toolSortApply() {
     if (!selectedId) return;
 
-    await runTask("Sort playlist", async (taskId) => {
+    await runMutationTask("Sort playlist", async (taskId) => {
       const items = await fetchAllPlaylistItems(selectedId, taskId);
       const d = computeDiag(items);
       setDiag(d);
 
+      const safeUris = ensureSafeMutation("Sorting", items);
       const sorted = sortItems(items, toolSort);
       const uris = extractUris(sorted);
 
-      if (uris.length === 0) {
-        const sample = items.slice(0, 5).map((it) => ({
-          added_at: it.added_at,
-          is_local: it.is_local,
-          track: it.track
-            ? {
-                name: it.track.name,
-                uri: it.track.uri,
-                id: it.track.uri?.split(":").pop(),
-              }
-            : null,
-        }));
-
-        const error = new Error(
-          "No track URIs returned by Spotify for this playlist. This usually means market/relinking restrictions. (Fix: items API must use market=from_token.)"
-        ) as any;
-        error.sample = sample;
-        throw error;
+      if (uris.length !== safeUris.length) {
+        throw new Error("Sorting could not preserve every supported playlist item.");
       }
 
       updateTask(taskId, { message: "Applying changes..." });
       const res = await applyOrder(selectedId, uris);
 
       updateTask(taskId, {
-        message: `Completed: sorted ${uris.length} tracks${res?.snapshot_id ? ` - snapshot ${String(res.snapshot_id).slice(0, 8)}...` : ""}`, 
+        message: `Completed: sorted ${uris.length} items${res?.snapshot_id ? ` - snapshot ${String(res.snapshot_id).slice(0, 8)}...` : ""}`,
       });
     });
   }
@@ -618,23 +703,18 @@ export default function PlaylistsPage() {
   async function toolShuffle() {
     if (!selectedId) return;
 
-    await runTask("Shuffle playlist", async (taskId) => {
+    await runMutationTask("Shuffle playlist", async (taskId) => {
       const items = await fetchAllPlaylistItems(selectedId, taskId);
       const d = computeDiag(items);
       setDiag(d);
 
-      const uris = extractUris(items);
-      if (uris.length === 0) {
-        throw new Error(
-          `No playable tracks found (found ${d.missing} unavailable / blocked tracks). Try another playlist or remove unavailable tracks first.`
-        );
-      }
+      const uris = ensureSafeMutation("Shuffling", items);
 
       updateTask(taskId, { message: "Applying changes..." });
       const res = await applyOrder(selectedId, shuffleArray(uris));
 
       updateTask(taskId, {
-        message: `Completed: shuffled ${uris.length} tracks${res?.snapshot_id ? ` - snapshot ${String(res.snapshot_id).slice(0, 8)}...` : ""}`, 
+        message: `Completed: shuffled ${uris.length} items${res?.snapshot_id ? ` - snapshot ${String(res.snapshot_id).slice(0, 8)}...` : ""}`,
       });
     });
   }
@@ -653,17 +733,12 @@ export default function PlaylistsPage() {
   async function toolDedupe() {
     if (!selectedId) return;
 
-    await runTask("Dedupe playlist", async (taskId) => {
+    await runMutationTask("Dedupe playlist", async (taskId) => {
       const items = await fetchAllPlaylistItems(selectedId, taskId);
       const d = computeDiag(items);
       setDiag(d);
 
-      const uris = extractUris(items);
-      if (uris.length === 0) {
-        throw new Error(
-          `No playable tracks found (found ${d.missing} unavailable / blocked tracks). Try another playlist or remove unavailable tracks first.`
-        );
-      }
+      const uris = ensureSafeMutation("Dedupe", items);
 
       const deduped = uniqueByUriPreserveOrder(uris);
       const removed = uris.length - deduped.length;
@@ -672,7 +747,7 @@ export default function PlaylistsPage() {
       const res = await applyOrder(selectedId, deduped);
 
       updateTask(taskId, {
-        message: `Completed: removed ${removed} duplicates - kept ${deduped.length}${res?.snapshot_id ? ` - snapshot ${String(res.snapshot_id).slice(0, 8)}...` : ""}`, 
+        message: `Completed: removed ${removed} duplicates - kept ${deduped.length}${res?.snapshot_id ? ` - snapshot ${String(res.snapshot_id).slice(0, 8)}...` : ""}`,
       });
     });
   }
@@ -680,7 +755,7 @@ export default function PlaylistsPage() {
   async function toolRemoveUnavailable() {
     if (!selectedId) return;
 
-    await runTask("Remove unavailable", async (taskId) => {
+    await runMutationTask("Remove unavailable", async (taskId) => {
       const items = await fetchAllPlaylistItems(selectedId, taskId);
       const d = computeDiag(items);
       setDiag(d);
@@ -696,7 +771,7 @@ export default function PlaylistsPage() {
       const res = await applyOrder(selectedId, uris);
 
       updateTask(taskId, {
-        message: `Completed: kept ${uris.length} tracks${res?.snapshot_id ? ` - snapshot ${String(res.snapshot_id).slice(0, 8)}...` : ""}`, 
+        message: `Completed: kept ${uris.length} items${res?.snapshot_id ? ` - snapshot ${String(res.snapshot_id).slice(0, 8)}...` : ""}`,
       });
     });
   }
@@ -772,8 +847,11 @@ export default function PlaylistsPage() {
     if (!selectedId) return;
     try {
       const r = await fetch(`/api/spotify/playlists/${selectedId}/items?limit=50&offset=0`, { cache: "no-store" });
-      const body = (await r.json().catch(() => null)) as PlaylistItemsResponse | null;
-      const items = body?.items ?? [];
+      const body = (await r.json().catch(() => null)) as PlaylistItemsResponse | ApiErrorResponse | null;
+      if (!r.ok) {
+        throw new Error(body?.error ? String(body.error) : `Request failed (${r.status})`);
+      }
+      const items = (body as PlaylistItemsResponse | null)?.items ?? [];
       setDiag(computeDiag(items));
     } catch {
       setDiag(null);
@@ -950,7 +1028,7 @@ export default function PlaylistsPage() {
                 <div className="space-y-1.5">
                   <button
                     onClick={toolShuffle}
-                    disabled={!selectedId || retryAfter > 0}
+                    disabled={!selectedId || retryAfter > 0 || mutationRunning}
                     className="w-full rounded-xl border border-border bg-surface px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Shuffle
@@ -958,7 +1036,7 @@ export default function PlaylistsPage() {
 
                   <button
                     onClick={toolDedupe}
-                    disabled={!selectedId || retryAfter > 0}
+                    disabled={!selectedId || retryAfter > 0 || mutationRunning}
                     className="w-full rounded-xl border border-border bg-surface px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Dedupe
@@ -966,7 +1044,7 @@ export default function PlaylistsPage() {
 
                   <button
                     onClick={toolRemoveUnavailable}
-                    disabled={!selectedId || retryAfter > 0}
+                    disabled={!selectedId || retryAfter > 0 || mutationRunning}
                     className="w-full rounded-xl border border-border bg-surface px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Remove unavailable
@@ -1016,7 +1094,7 @@ export default function PlaylistsPage() {
 
                     <button
                       onClick={toolSortApply}
-                      disabled={!selectedId || retryAfter > 0}
+                      disabled={!selectedId || retryAfter > 0 || mutationRunning}
                       className="w-full rounded-xl bg-accent px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-accent-hover active:bg-accent-pressed disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Sort

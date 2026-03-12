@@ -30,6 +30,10 @@ type RecentlyPlayed = {
   }[];
 };
 
+type ApiErrorResponse = {
+  error?: string;
+};
+
 function pickLargeImage(images?: SpotifyImage[]) {
   if (!images || images.length === 0) return null;
   return images[0]?.url ?? images[images.length - 1]?.url ?? null;
@@ -61,6 +65,19 @@ function timeAgo(iso: string) {
   return rtf.format(-days, "day");
 }
 
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
+
+function getApiErrorMessage(data: unknown, fallback: string) {
+  if (data && typeof data === "object" && "error" in data && typeof data.error === "string") {
+    return data.error;
+  }
+
+  return fallback;
+}
+
 export default function HomePage() {
   const [now, setNow] = useState<CurrentlyPlaying | null>(null);
   const [recent, setRecent] = useState<RecentlyPlayed | null>(null);
@@ -88,21 +105,22 @@ export default function HomePage() {
     async function loadNow() {
       try {
         const res = await fetch("/api/spotify/now-playing", { cache: "no-store" });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.error ?? `Now playing failed (${res.status})`);
+        const data = (await res.json()) as CurrentlyPlaying | ApiErrorResponse;
+        if (!res.ok) throw new Error(getApiErrorMessage(data, `Now playing failed (${res.status})`));
         if (cancelled) return;
 
-        setNow(data);
+        const nowData = data as CurrentlyPlaying;
+        setNow(nowData);
 
-        const p = typeof data?.progress_ms === "number" ? data.progress_ms : 0;
+        const p = typeof nowData.progress_ms === "number" ? nowData.progress_ms : 0;
         setLiveProgress(p);
 
-        playingRef.current = !!data?.is_playing;
-        durationRef.current = typeof data?.item?.duration_ms === "number" ? data.item.duration_ms : 0;
+        playingRef.current = !!nowData.is_playing;
+        durationRef.current = typeof nowData.item?.duration_ms === "number" ? nowData.item.duration_ms : 0;
 
         setError(null);
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message ?? "Failed to load now playing");
+      } catch (error: unknown) {
+        if (!cancelled) setError(getErrorMessage(error, "Failed to load now playing"));
       }
     }
 
@@ -121,9 +139,9 @@ export default function HomePage() {
     async function loadRecent() {
       try {
         const res = await fetch("/api/spotify/recently-played?limit=20", { cache: "no-store" });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.error ?? `Recently played failed (${res.status})`);
-        if (!cancelled) setRecent(data);
+        const data = (await res.json()) as RecentlyPlayed | ApiErrorResponse;
+        if (!res.ok) throw new Error(getApiErrorMessage(data, `Recently played failed (${res.status})`));
+        if (!cancelled) setRecent(data as RecentlyPlayed);
       } catch {
         // silent
       }

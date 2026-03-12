@@ -1,9 +1,23 @@
 import { NextResponse } from "next/server";
 import { spotifyFetch, isSpotifyApiError } from "@/lib/spotify";
 
+type SpotifyImage = { url: string };
+
+type CurrentlyPlayingResponse = {
+  is_playing?: boolean;
+  progress_ms?: number;
+  item?: {
+    name: string;
+    duration_ms?: number;
+    external_urls?: { spotify?: string };
+    album?: { name: string; images?: SpotifyImage[] };
+    artists?: { name: string }[];
+  };
+};
+
 export async function GET() {
   try {
-    const data = await spotifyFetch<any>("/v1/me/player/currently-playing");
+    const data = await spotifyFetch<CurrentlyPlayingResponse | undefined>("/v1/me/player/currently-playing");
     if (!data) return NextResponse.json({ is_playing: false }, { status: 200 });
     return NextResponse.json(data, { status: 200 });
   } catch (e: unknown) {

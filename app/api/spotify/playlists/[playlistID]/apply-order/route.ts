@@ -49,6 +49,10 @@ function chunk<T>(items: T[], size: number) {
   return out;
 }
 
+function isPlaylistItemUri(uri: string) {
+  return uri.startsWith("spotify:track:") || uri.startsWith("spotify:episode:");
+}
+
 function hasModifyScope(scope: string) {
   const granted = new Set(scope.split(/\s+/).filter(Boolean));
   return granted.has("playlist-modify-public") || granted.has("playlist-modify-private");
@@ -142,11 +146,11 @@ export async function POST(
 
   const body = (await req.json().catch(() => null)) as { uris?: unknown } | null;
   const uris = Array.isArray(body?.uris)
-    ? body.uris.filter((uri): uri is string => typeof uri === "string" && uri.startsWith("spotify:track:"))
+    ? body.uris.filter((uri): uri is string => typeof uri === "string" && isPlaylistItemUri(uri))
     : [];
 
   if (uris.length === 0) {
-    return NextResponse.json({ error: "No track URIs were provided." }, { status: 400 });
+    return NextResponse.json({ error: "No playlist item URIs were provided." }, { status: 400 });
   }
 
   try {

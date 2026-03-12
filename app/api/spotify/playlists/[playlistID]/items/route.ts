@@ -16,7 +16,11 @@ type RawSpotifyAlbum = {
   release_date?: string | null;
 };
 
-type RawSpotifyTrack = {
+type RawSpotifyShow = {
+  name?: string | null;
+};
+
+type RawSpotifyItem = {
   type?: string | null;
   uri?: string | null;
   name?: string | null;
@@ -24,13 +28,15 @@ type RawSpotifyTrack = {
   track_number?: number | null;
   artists?: RawSpotifyArtist[] | null;
   album?: RawSpotifyAlbum | null;
+  show?: RawSpotifyShow | null;
+  release_date?: string | null;
 };
 
 type RawPlaylistItem = {
   added_at?: string | null;
   is_local?: boolean;
-  item?: RawSpotifyTrack | null;
-  track?: RawSpotifyTrack | null;
+  item?: RawSpotifyItem | null;
+  track?: RawSpotifyItem | null;
 };
 
 type RawPlaylistItemsResponse = {
@@ -59,11 +65,30 @@ function getAccessToken(session: unknown): string | null {
   return (session as SessionWithSpotify | null | undefined)?.accessToken ?? null;
 }
 
-function normalizeTrack(track: RawSpotifyTrack | null | undefined) {
+function normalizeTrack(track: RawSpotifyItem | null | undefined) {
   if (!track) return null;
-  if (track.type && track.type !== "track") return null;
+
+  const type = track.type === "episode" ? "episode" : "track";
+  const albumName =
+    type === "episode"
+      ? typeof track.show?.name === "string"
+        ? track.show.name
+        : ""
+      : typeof track.album?.name === "string"
+      ? track.album.name
+      : "";
+
+  const releaseDate =
+    type === "episode"
+      ? typeof track.release_date === "string"
+        ? track.release_date
+        : ""
+      : typeof track.album?.release_date === "string"
+      ? track.album.release_date
+      : "";
 
   return {
+    type,
     uri: typeof track.uri === "string" ? track.uri : null,
     name: typeof track.name === "string" ? track.name : "",
     duration_ms: typeof track.duration_ms === "number" ? track.duration_ms : 0,
@@ -74,9 +99,8 @@ function normalizeTrack(track: RawSpotifyTrack | null | undefined) {
         }))
       : [],
     album: {
-      name: typeof track.album?.name === "string" ? track.album.name : "",
-      release_date:
-        typeof track.album?.release_date === "string" ? track.album.release_date : "",
+      name: albumName,
+      release_date: releaseDate,
     },
   };
 }
@@ -134,8 +158,8 @@ export async function GET(
     "items(",
     "added_at,",
     "is_local,",
-    "item(type,uri,name,duration_ms,track_number,artists(name),album(name,release_date)),",
-    "track(type,uri,name,duration_ms,track_number,artists(name),album(name,release_date))",
+    "item(type,uri,name,duration_ms,track_number,release_date,artists(name),album(name,release_date),show(name)),",
+    "track(type,uri,name,duration_ms,track_number,release_date,artists(name),album(name,release_date),show(name))",
     "),",
     "total,limit,offset,next",
   ].join("");
