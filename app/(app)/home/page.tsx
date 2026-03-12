@@ -166,9 +166,9 @@ export default function HomePage() {
         {showEmpty ? (
           <p className="mt-4 text-sm text-text-muted">Nothing playing right now.</p>
         ) : (
-          <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="relative h-28 w-28 overflow-hidden rounded-md bg-surface-hover">
+          <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_220px] xl:items-center">
+            <div className="grid gap-5 md:grid-cols-[152px_minmax(0,1fr)] md:items-center">
+              <div className="relative aspect-square w-full max-w-[152px] overflow-hidden rounded-2xl bg-surface-hover shadow-[0_18px_44px_rgba(0,0,0,0.28)]">
                 {artworkLarge ? (
                   <Image
                     src={artworkLarge}
@@ -176,32 +176,38 @@ export default function HomePage() {
                     fill
                     className="object-cover"
                     quality={100}
-                    sizes="112px"
+                    sizes="152px"
                     priority
                   />
                 ) : null}
               </div>
 
-              <div>
-                <p className="text-lg font-semibold text-text-primary">{track.name}</p>
-                <p className="text-sm text-text-secondary">{artistNames}</p>
-                <p className="text-sm text-text-muted">{albumName}</p>
+              <div className="flex min-h-[152px] min-w-0 flex-col justify-center">
+                <div className="min-w-0">
+                  <p className="text-2xl font-semibold leading-tight text-text-primary md:text-3xl">
+                    {track.name}
+                  </p>
+                  <p className="mt-2 text-base text-text-secondary md:text-lg">{artistNames}</p>
+                  <p className="mt-1 text-sm text-text-muted md:text-base">{albumName}</p>
+                </div>
 
-                <div className="mt-3 flex items-center gap-3">
-                  <span className="text-xs text-text-muted">{formatTime(liveProgress)}</span>
+                <div className="mt-5 rounded-2xl border border-border bg-primary/35 p-4">
+                  <div className="flex items-center gap-3">
+                    <span className="min-w-10 text-xs text-text-muted">{formatTime(liveProgress)}</span>
 
-                  <div className="h-2 w-64 overflow-hidden rounded bg-surface-hover">
-                    <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
+                    <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-surface-hover">
+                      <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
+                    </div>
+
+                    <span className="min-w-10 text-right text-xs text-text-muted">{formatTime(duration)}</span>
                   </div>
-
-                  <span className="text-xs text-text-muted">{formatTime(duration)}</span>
                 </div>
               </div>
             </div>
 
             {openUrl ? (
               <a
-                className="rounded-lg bg-accent px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-hover active:bg-accent-pressed focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
+                className="inline-flex items-center justify-center self-stretch rounded-xl bg-accent px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-hover active:bg-accent-pressed focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)] xl:self-center"
                 href={openUrl}
                 target="_blank"
                 rel="noreferrer"
@@ -225,7 +231,7 @@ export default function HomePage() {
           <p className="mt-4 text-sm text-text-muted">No recently played items found.</p>
         ) : (
           <div className="mt-4 overflow-hidden rounded-md border border-border">
-            <div className="hidden grid-cols-[56px_2fr_1.5fr_1.5fr_140px] border-b border-border bg-surface md:grid">
+            <div className="hidden grid-cols-[52px_2fr_1.5fr_1.5fr_120px] border-b border-border bg-surface md:grid">
               <div className="px-3 py-3" />
               <div className="px-3 py-3 text-center text-xs font-semibold text-text-muted">Track</div>
               <div className="px-3 py-3 text-center text-xs font-semibold text-text-muted">Artist</div>
@@ -235,7 +241,7 @@ export default function HomePage() {
 
             <div className="divide-y divide-border">
               {recent.items.map((row) => {
-                const img = pickLargeImage(row.track.album.images); // higher-res
+                const img = pickLargeImage(row.track.album.images);
                 const artists = row.track.artists.map((a) => a.name).join(", ");
                 const album = row.track.album.name;
                 const ago = timeAgo(row.played_at);
@@ -243,10 +249,10 @@ export default function HomePage() {
                 return (
                   <div
                     key={`${row.track.id}-${row.played_at}`}
-                    className="grid grid-cols-[56px_1fr] gap-3 px-3 py-5 md:grid-cols-[56px_2fr_1.5fr_1.5fr_140px] md:gap-0"
+                    className="grid grid-cols-[52px_1fr] gap-3 px-3 py-3.5 md:grid-cols-[52px_2fr_1.5fr_1.5fr_120px] md:gap-0"
                   >
                     <div className="flex items-center">
-                      <div className="relative h-11 w-11 overflow-hidden rounded bg-surface-hover">
+                      <div className="relative h-10 w-10 overflow-hidden rounded bg-surface-hover">
                         {img ? (
                           <Image
                             src={img}
@@ -254,28 +260,27 @@ export default function HomePage() {
                             fill
                             className="object-cover"
                             quality={90}
-                            // request a larger optimized size than the visual box for sharper downscaling
                             sizes="96px"
                           />
                         ) : null}
                       </div>
                     </div>
 
-                    <div className="min-w-0 md:px-3 md:flex md:items-center">
+                    <div className="min-w-0 md:flex md:items-center md:px-3">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-semibold text-text-primary">{row.track.name}</div>
-                        <div className="mt-0.5 truncate text-xs text-text-muted md:hidden">
-                          {artists} • {album}
+                        <div className="truncate text-xs text-text-muted md:hidden">
+                          {artists} â€¢ {album}
                         </div>
                       </div>
                     </div>
 
                     <div className="hidden min-w-0 px-3 md:flex md:items-center md:justify-center">
-                      <div className="truncate text-sm text-text-secondary text-center">{artists}</div>
+                      <div className="truncate text-sm text-center text-text-secondary">{artists}</div>
                     </div>
 
                     <div className="hidden min-w-0 px-3 md:flex md:items-center md:justify-center">
-                      <div className="truncate text-sm text-text-secondary text-center">{album}</div>
+                      <div className="truncate text-sm text-center text-text-secondary">{album}</div>
                     </div>
 
                     <div className="flex items-center justify-end md:px-3">

@@ -154,7 +154,7 @@ export default function StatsPage() {
 
         <div className="flex flex-wrap items-center gap-2">
           <button
-            className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)] disabled:opacity-60"
+            className="rounded-md bg-accent px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent-hover active:bg-accent-pressed focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)] disabled:opacity-60"
             onClick={onRefresh}
             disabled={loading}
           >
@@ -162,7 +162,7 @@ export default function StatsPage() {
           </button>
 
           <select
-            className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
+            className="rounded-md border border-accent/40 bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:border-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
             value={timeRange}
             onChange={(e) => setTimeRange(e.target.value as TimeRange)}
           >
@@ -175,7 +175,7 @@ export default function StatsPage() {
 
       <div className="sticky top-4 z-20 mt-6">
         <div className="rounded-md border border-border bg-surface/90 p-2 backdrop-blur">
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             {(
               [
                 ["artists", "Top Artists"],
@@ -188,11 +188,10 @@ export default function StatsPage() {
                 <button
                   key={key}
                   className={[
-                    "rounded-md border px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]",
-                    "border-border",
+                    "w-full rounded-md border px-3 py-2 text-center text-sm transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]",
                     active
-                      ? "bg-surface-hover text-text-primary"
-                      : "bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary",
+                      ? "border-accent bg-accent text-white"
+                      : "border-border bg-surface text-text-secondary hover:border-accent/40 hover:bg-surface-hover hover:text-text-primary",
                   ].join(" ")}
                   onClick={() => setTab(key)}
                 >

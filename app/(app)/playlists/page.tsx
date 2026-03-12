@@ -1,4 +1,4 @@
-// app/(app)/playlists/page.tsx
+﻿// app/(app)/playlists/page.tsx
 "use client";
 
 import Image from "next/image";
@@ -183,9 +183,6 @@ export default function PlaylistsPage() {
 
   const [playlistSearch, setPlaylistSearch] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("default");
-
-  const [sortOpen, setSortOpen] = useState(false);
-  const [sortDraft, setSortDraft] = useState<SortMode>("default");
 
   const [page, setPage] = useState(1);
 
@@ -401,18 +398,6 @@ export default function PlaylistsPage() {
     return filteredPlaylists.slice(start, end);
   }, [filteredPlaylists, currentPage]);
 
-  function openSort() {
-    setSortDraft(sortMode);
-    setSortOpen(true);
-  }
-  function closeSort() {
-    setSortOpen(false);
-  }
-  function applySort() {
-    setSortMode(sortDraft);
-    setSortOpen(false);
-  }
-
   function goToPage(p: number) {
     setPage(p);
   }
@@ -621,11 +606,11 @@ export default function PlaylistsPage() {
         throw error;
       }
 
-      updateTask(taskId, { message: "Applying changes…" });
+      updateTask(taskId, { message: "Applying changes..." });
       const res = await applyOrder(selectedId, uris);
 
       updateTask(taskId, {
-        message: `Completed: sorted ${uris.length} tracks${res?.snapshot_id ? ` • snapshot ${String(res.snapshot_id).slice(0, 8)}…` : ""}`,
+        message: `Completed: sorted ${uris.length} tracks${res?.snapshot_id ? ` - snapshot ${String(res.snapshot_id).slice(0, 8)}...` : ""}`, 
       });
     });
   }
@@ -645,11 +630,11 @@ export default function PlaylistsPage() {
         );
       }
 
-      updateTask(taskId, { message: "Applying changes…" });
+      updateTask(taskId, { message: "Applying changes..." });
       const res = await applyOrder(selectedId, shuffleArray(uris));
 
       updateTask(taskId, {
-        message: `Completed: shuffled ${uris.length} tracks${res?.snapshot_id ? ` • snapshot ${String(res.snapshot_id).slice(0, 8)}…` : ""}`,
+        message: `Completed: shuffled ${uris.length} tracks${res?.snapshot_id ? ` - snapshot ${String(res.snapshot_id).slice(0, 8)}...` : ""}`, 
       });
     });
   }
@@ -683,11 +668,11 @@ export default function PlaylistsPage() {
       const deduped = uniqueByUriPreserveOrder(uris);
       const removed = uris.length - deduped.length;
 
-      updateTask(taskId, { message: "Applying changes…" });
+      updateTask(taskId, { message: "Applying changes..." });
       const res = await applyOrder(selectedId, deduped);
 
       updateTask(taskId, {
-        message: `Completed: removed ${removed} duplicates • kept ${deduped.length}${res?.snapshot_id ? ` • snapshot ${String(res.snapshot_id).slice(0, 8)}…` : ""}`,
+        message: `Completed: removed ${removed} duplicates - kept ${deduped.length}${res?.snapshot_id ? ` - snapshot ${String(res.snapshot_id).slice(0, 8)}...` : ""}`, 
       });
     });
   }
@@ -707,11 +692,11 @@ export default function PlaylistsPage() {
         );
       }
 
-      updateTask(taskId, { message: "Applying changes…" });
+      updateTask(taskId, { message: "Applying changes..." });
       const res = await applyOrder(selectedId, uris);
 
       updateTask(taskId, {
-        message: `Completed: kept ${uris.length} tracks${res?.snapshot_id ? ` • snapshot ${String(res.snapshot_id).slice(0, 8)}…` : ""}`,
+        message: `Completed: kept ${uris.length} tracks${res?.snapshot_id ? ` - snapshot ${String(res.snapshot_id).slice(0, 8)}...` : ""}`, 
       });
     });
   }
@@ -805,26 +790,24 @@ export default function PlaylistsPage() {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={openSort}
-              className="relative rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
-              title="Sort playlists"
-            >
-              Sort
-              {sortMode === "default" ? null : (
-                <span className="ml-2 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-accent px-2 text-xs font-semibold text-white">
-                  1
-                </span>
-              )}
-            </button>
-
-            <button
               onClick={loadInitial}
-              className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)] disabled:opacity-50"
+              className="rounded-md bg-accent px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent-hover active:bg-accent-pressed focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)] disabled:opacity-50"
               disabled={loading || loadingMore}
               title="Refresh playlists"
             >
-              {loading ? "Refreshing…" : "Refresh"}
+              {loading ? "Refreshing..." : "Refresh"}
             </button>
+
+            <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as SortMode)}
+              className="rounded-md border border-accent/40 bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:border-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
+              aria-label="Sort playlists"
+            >
+              <option value="default">Default (custom order)</option>
+              <option value="name_asc">Playlist name (A - Z)</option>
+              <option value="name_desc">Playlist name (Z - A)</option>
+            </select>
           </div>
         </div>
 
@@ -838,7 +821,7 @@ export default function PlaylistsPage() {
               setPlaylistSearch(e.target.value);
               setPage(1);
             }}
-            placeholder="Search playlists…"
+            placeholder="Search playlists..."
             className="w-full max-w-md rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
           />
 
@@ -846,12 +829,12 @@ export default function PlaylistsPage() {
             <span>
               Page <span className="font-semibold text-text-primary">{currentPage}</span> / {totalPages}
             </span>
-            {loadingMore ? <span className="text-xs text-text-muted">Loading…</span> : null}
+            {loadingMore ? <span className="text-xs text-text-muted">Loading...</span> : null}
           </div>
         </div>
 
         {loading ? (
-          <p className="mt-6 text-sm text-text-muted">Loading…</p>
+          <p className="mt-6 text-sm text-text-muted">Loading...</p>
         ) : filteredPlaylists.length === 0 ? (
           <p className="mt-6 text-sm text-text-muted">No playlists found.</p>
         ) : (
@@ -866,8 +849,10 @@ export default function PlaylistsPage() {
                     key={p.id}
                     onClick={() => setSelectedId(p.id)}
                     className={[
-                      "group relative overflow-hidden rounded-xl border text-left transition-colors",
-                      active ? "border-accent" : "border-border",
+                      "group relative overflow-hidden rounded-xl border-2 text-left transition-all",
+                      active
+                        ? "border-accent shadow-[0_0_0_1px_rgba(59,130,246,0.35),0_0_28px_rgba(59,130,246,0.14)]"
+                        : "border-border hover:border-slate-500/80",
                       "bg-surface hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]",
                     ].join(" ")}
                   >
@@ -923,86 +908,126 @@ export default function PlaylistsPage() {
         )}
       </div>
 
-      {sortOpen ? (
-        <div className="fixed inset-0 z-50">
-          <div className="absolute inset-0 bg-black/50" onClick={closeSort} />
-          <div className="absolute left-1/2 top-1/2 w-[min(720px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-surface p-6 shadow-2xl">
-            <div className="text-2xl font-semibold text-text-primary">Sort your playlists</div>
-
-            <div className="mt-6">
-              <div className="text-sm font-semibold text-text-secondary">Sort by:</div>
-
-              <div className="mt-3 space-y-3 text-sm text-text-primary">
-                <label className="flex items-center gap-3">
-                  <input type="radio" name="sort" checked={sortDraft === "default"} onChange={() => setSortDraft("default")} className="accent-[var(--accent)]" />
-                  Default (custom order)
-                </label>
-
-                <label className="flex items-center gap-3">
-                  <input type="radio" name="sort" checked={sortDraft === "name_asc"} onChange={() => setSortDraft("name_asc")} className="accent-[var(--accent)]" />
-                  Playlist name (A → Z)
-                </label>
-
-                <label className="flex items-center gap-3">
-                  <input type="radio" name="sort" checked={sortDraft === "name_desc"} onChange={() => setSortDraft("name_desc")} className="accent-[var(--accent)]" />
-                  Playlist name (Z → A)
-                </label>
-              </div>
-            </div>
-
-            <div className="mt-8 flex justify-end gap-3">
-              <button onClick={() => setSortDraft("default")} className="rounded-lg border border-border bg-surface px-4 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover">
-                Reset
-              </button>
-
-              <button onClick={closeSort} className="rounded-lg border border-border bg-surface px-4 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover">
-                Cancel
-              </button>
-
-              <button
-                onClick={applySort}
-                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent-hover active:bg-accent-pressed focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
-              >
-                Apply
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       <div className={`fixed inset-0 z-40 ${drawerOpen ? "" : "pointer-events-none"}`} aria-hidden={!drawerOpen}>
         <div className={`absolute inset-0 bg-black/40 transition-opacity ${drawerOpen ? "opacity-100" : "opacity-0"}`} onClick={() => setDrawerOpen(false)} />
 
         <aside
-          className={`absolute right-0 top-0 h-full w-full max-w-md transform border-l border-border bg-surface text-text-primary shadow-xl transition-transform ${
+          className={`absolute right-0 top-0 h-full w-full max-w-[350px] overflow-y-auto transform border-l border-border bg-surface text-text-primary shadow-xl transition-transform ${
             drawerOpen ? "translate-x-0" : "translate-x-full"
           }`}
         >
-          <div className="flex items-center justify-between border-b border-border p-4">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold">{selected?.name ?? "Playlist"}</div>
               <div className="truncate text-xs text-text-muted">{selected?.owner?.display_name ? `Made by ${selected.owner.display_name}` : " "}</div>
             </div>
 
             <button
-              className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
               onClick={() => setDrawerOpen(false)}
             >
               Close
             </button>
           </div>
 
-          <div className="p-4 space-y-6">
+          <div className="space-y-4 px-3.5 py-3.5">
             <div>
               <div className="text-xs font-semibold text-text-muted">OPEN</div>
               <a
-                className="mt-2 block rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
+                className="mt-2 flex items-center justify-center rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent-hover active:bg-accent-pressed focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
                 href={selected ? `https://open.spotify.com/playlist/${selected.id}` : "#"}
                 target="_blank"
                 rel="noreferrer"
               >
                 Open on Spotify
               </a>
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold text-text-muted">TOOLS</div>
+
+              <div className="mt-2 rounded-2xl border border-border bg-primary/35 p-3">
+                <div className="space-y-1.5">
+                  <button
+                    onClick={toolShuffle}
+                    disabled={!selectedId || retryAfter > 0}
+                    className="w-full rounded-xl border border-border bg-surface px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Shuffle
+                  </button>
+
+                  <button
+                    onClick={toolDedupe}
+                    disabled={!selectedId || retryAfter > 0}
+                    className="w-full rounded-xl border border-border bg-surface px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Dedupe
+                  </button>
+
+                  <button
+                    onClick={toolRemoveUnavailable}
+                    disabled={!selectedId || retryAfter > 0}
+                    className="w-full rounded-xl border border-border bg-surface px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Remove unavailable
+                  </button>
+
+                  <button
+                    onClick={toolExportCsv}
+                    disabled={!selectedId}
+                    className="w-full rounded-xl border border-border bg-surface px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Export CSV
+                  </button>
+
+                  <button
+                    onClick={toolExportJson}
+                    disabled={!selectedId}
+                    className="w-full rounded-xl border border-border bg-surface px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Export JSON
+                  </button>
+                </div>
+
+                <div className="mt-3 border-t border-border pt-3">
+                  <div className="text-sm font-semibold text-text-primary">Sort tracks</div>
+
+                  <div className="mt-2 space-y-1.5">
+                    <select
+                      value={toolSort}
+                      onChange={(e) => setToolSort(e.target.value as ToolSort)}
+                      className="w-full rounded-xl border border-border bg-surface px-3 py-1.5 text-sm text-text-primary outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
+                    >
+                      <option value="track_asc">Track name (A - Z)</option>
+                      <option value="track_desc">Track name (Z - A)</option>
+                      <option value="artist_asc">Artist (A - Z)</option>
+                      <option value="artist_desc">Artist (Z - A)</option>
+                      <option value="album_asc">Album (A - Z)</option>
+                      <option value="album_desc">Album (Z - A)</option>
+                      <option value="release_date_asc">Release date (old - new)</option>
+                      <option value="release_date_desc">Release date (new - old)</option>
+                      <option value="duration_asc">Duration (short - long)</option>
+                      <option value="duration_desc">Duration (long - short)</option>
+                      <option value="track_number_asc">Track # (low - high)</option>
+                      <option value="track_number_desc">Track # (high - low)</option>
+                      <option value="date_added_asc">Date added (old - new)</option>
+                      <option value="date_added_desc">Date added (new - old)</option>
+                    </select>
+
+                    <button
+                      onClick={toolSortApply}
+                      disabled={!selectedId || retryAfter > 0}
+                      className="w-full rounded-xl bg-accent px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-accent-hover active:bg-accent-pressed disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Sort
+                    </button>
+                  </div>
+
+                  <p className="mt-2 text-[11px] leading-4 text-text-muted">
+                    After completion, open Spotify and set playlist sort to <span className="font-semibold">Custom order</span> to see reordered tracks.
+                  </p>
+                </div>
+              </div>
             </div>
 
             <div>
@@ -1017,9 +1042,9 @@ export default function PlaylistsPage() {
                 </button>
               </div>
 
-              <div className="mt-2 rounded-xl border border-border bg-surface p-3 text-xs text-text-secondary">
+              <div className="mt-2 rounded-2xl border border-border bg-primary/35 p-3 text-xs text-text-secondary">
                 {diag ? (
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <div>
                       Total items: <span className="font-semibold text-text-primary">{diag.total}</span>
                     </div>
@@ -1036,93 +1061,6 @@ export default function PlaylistsPage() {
                 ) : (
                   <div>Run a tool or press Refresh to see counts.</div>
                 )}
-              </div>
-            </div>
-
-            <div>
-              <div className="text-xs font-semibold text-text-muted">TOOLS</div>
-
-              <div className="mt-2 rounded-xl border border-border bg-surface p-3">
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={toolShuffle}
-                    disabled={!selectedId || retryAfter > 0}
-                    className="rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Shuffle
-                  </button>
-
-                  <button
-                    onClick={toolDedupe}
-                    disabled={!selectedId || retryAfter > 0}
-                    className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Dedupe
-                  </button>
-
-                  <button
-                    onClick={toolRemoveUnavailable}
-                    disabled={!selectedId || retryAfter > 0}
-                    className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Remove unavailable
-                  </button>
-
-                  <button
-                    onClick={toolExportCsv}
-                    disabled={!selectedId}
-                    className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Export CSV
-                  </button>
-
-                  <button
-                    onClick={toolExportJson}
-                    disabled={!selectedId}
-                    className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Export JSON
-                  </button>
-                </div>
-
-                <div className="mt-3 border-t border-border pt-3">
-                  <div className="text-xs font-semibold text-text-secondary">Sort tracks</div>
-
-                  <div className="mt-2 flex gap-2">
-                    <select
-                      value={toolSort}
-                      onChange={(e) => setToolSort(e.target.value as ToolSort)}
-                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-primary outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
-                    >
-                      <option value="track_asc">Track name (A → Z)</option>
-                      <option value="track_desc">Track name (Z → A)</option>
-                      <option value="artist_asc">Artist (A → Z)</option>
-                      <option value="artist_desc">Artist (Z → A)</option>
-                      <option value="album_asc">Album (A → Z)</option>
-                      <option value="album_desc">Album (Z → A)</option>
-                      <option value="release_date_asc">Release date (old → new)</option>
-                      <option value="release_date_desc">Release date (new → old)</option>
-                      <option value="duration_asc">Duration (short → long)</option>
-                      <option value="duration_desc">Duration (long → short)</option>
-                      <option value="track_number_asc">Track # (low → high)</option>
-                      <option value="track_number_desc">Track # (high → low)</option>
-                      <option value="date_added_asc">Date added (old → new)</option>
-                      <option value="date_added_desc">Date added (new → old)</option>
-                    </select>
-
-                    <button
-                      onClick={toolSortApply}
-                      disabled={!selectedId || retryAfter > 0}
-                      className="shrink-0 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Sort
-                    </button>
-                  </div>
-
-                  <p className="mt-2 text-[11px] text-text-muted">
-                    After completion, open Spotify and set playlist sort to <span className="font-semibold">Custom order</span> to see reordered tracks.
-                  </p>
-                </div>
               </div>
             </div>
           </div>
@@ -1167,7 +1105,7 @@ export default function PlaylistsPage() {
                             <div className="text-sm font-semibold text-text-primary">{t.title}</div>
                             <span
                               className={[
-                                "rounded-full px-2 py-1 text-xs font-semibold",
+                                "rounded-full px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.08em]",
                                 t.status === "running"
                                   ? "bg-accent/15 text-text-primary"
                                   : t.status === "finished"
@@ -1182,8 +1120,36 @@ export default function PlaylistsPage() {
                           </div>
 
                           {t.progress ? (
-                            <div className="mt-2 text-xs text-text-muted">
-                              {t.progress.current} / {t.progress.total}
+                            <div className="mt-3">
+                              <div className="h-2 overflow-hidden rounded-full bg-primary/80">
+                                <div
+                                  className={[
+                                    "h-full rounded-full transition-[width] duration-300",
+                                    t.status === "failed"
+                                      ? "bg-red-400"
+                                      : t.status === "finished"
+                                      ? "bg-green-400"
+                                      : "bg-accent",
+                                  ].join(" ")}
+                                  style={{
+                                    width: `${Math.max(
+                                      0,
+                                      Math.min(
+                                        100,
+                                        t.progress.total > 0
+                                          ? (t.progress.current / t.progress.total) * 100
+                                          : 0
+                                      )
+                                    )}%`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          ) : t.status === "running" || t.status === "queued" ? (
+                            <div className="mt-3">
+                              <div className="h-2 overflow-hidden rounded-full bg-primary/80">
+                                <div className="h-full w-1/3 rounded-full bg-accent/70" />
+                              </div>
                             </div>
                           ) : null}
 
