@@ -2,6 +2,20 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
+type SessionWithSpotify = {
+  accessToken?: string;
+  scope?: string;
+  error?: string;
+};
+
+type SpotifyErrorPayload = {
+  error?: {
+    message?: string;
+    status?: number;
+  };
+  snapshot_id?: string;
+};
+
 function normalizePlaylistId(input: string | undefined) {
   if (!input) return null;
 
@@ -16,109 +30,148 @@ function normalizePlaylistId(input: string | undefined) {
   return null;
 }
 
-function getAccessToken(session: unknown): string | null {
-  const s = session as
-    | {
-        accessToken?: string;
-        user?: { accessToken?: string; token?: string };
-        error?: string;
-      }
-    | undefined;
-
-  return s?.accessToken ?? s?.user?.accessToken ?? s?.user?.token ?? null;
+function getSessionData(session: unknown) {
+  const s = (session as SessionWithSpotify | null | undefined) ?? null;
+  return {
+    accessToken: s?.accessToken ?? null,
+    scope: s?.scope ?? "",
+    error: s?.error,
+  };
 }
 
-async function sleep(ms: number) {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
+function chunk<T>(items: T[], size: number) {
+  const out: T[][] = [];
 
-async function spotifyFetchWithRetry(url: string, accessToken: string, maxRetries = 3) {
-  let attempt = 0;
-
-  while (true) {
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      cache: "no-store",
-    });
-
-    if (res.status !== 429) return res;
-    if (attempt >= maxRetries) return res;
-
-    const retryAfter = Number(res.headers.get("retry-after") ?? "1");
-    await sleep(Math.min(Math.max(retryAfter, 1), 10) * 1000);
-    attempt += 1;
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
   }
+
+  return out;
 }
 
-export async function GET(
+function hasModifyScope(scope: string) {
+  const granted = new Set(scope.split(/\s+/).filter(Boolean));
+  return granted.has("playlist-modify-public") || granted.has("playlist-modify-private");
+}
+
+function buildForbiddenMessage(scope: string, spotifyMessage?: string) {
+  const hasScope = hasModifyScope(scope);
+
+  if (!hasScope) {
+    return "Spotify rejected the playlist update because the current session is missing playlist modify scope. Sign out and sign in again to grant playlist-modify-public and playlist-modify-private.";
+  }
+
+  if (spotifyMessage) {
+    return `${spotifyMessage} Spotify only allows modifying playlists you own or can collaborate on.`;
+  }
+
+  return "Spotify rejected the playlist update. You can only modify playlists you own or can collaborate on.";
+}
+
+async function spotifyWrite(
+  url: string,
+  accessToken: string,
+  method: "POST" | "PUT",
+  uris: string[],
+  scope: string
+) {
+  const res = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ uris }),
+    cache: "no-store",
+  });
+
+  const data = (await res.json().catch(() => null)) as SpotifyErrorPayload | null;
+
+  if (!res.ok) {
+    const spotifyMessage = data?.error?.message;
+    const errorMessage =
+      res.status === 403
+        ? buildForbiddenMessage(scope, spotifyMessage)
+        : spotifyMessage ?? "Spotify playlist update failed";
+
+    throw NextResponse.json(
+      {
+        error: errorMessage,
+        spotify: data,
+      },
+      { status: res.status }
+    );
+  }
+
+  return data;
+}
+
+export async function POST(
   req: Request,
   ctx: { params: Promise<{ playlistID: string }> }
 ) {
   const session = await getServerSession(authOptions);
-  const accessToken = getAccessToken(session);
 
-  if (!session || !accessToken) {
+  if (!session) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  if ((session as { error?: string }).error) {
+  const { accessToken, scope, error } = getSessionData(session);
+
+  if (error) {
     return NextResponse.json(
       { error: "Auth token refresh failed. Please sign out and sign in again." },
       { status: 401 }
     );
   }
 
-  const { playlistID: raw } = await ctx.params;
-  const playlistID = normalizePlaylistId(raw);
+  if (!accessToken) {
+    return NextResponse.json({ error: "Missing access token" }, { status: 401 });
+  }
+
+  const { playlistID: rawPlaylistId } = await ctx.params;
+  const playlistID = normalizePlaylistId(rawPlaylistId);
 
   if (!playlistID) {
     return NextResponse.json(
-      { error: `Invalid playlist id received: "${String(raw)}"` },
+      { error: `Invalid playlist id received: "${String(rawPlaylistId)}"` },
       { status: 400 }
     );
   }
 
-  const { searchParams } = new URL(req.url);
-  const limitValue = Number(searchParams.get("limit") ?? "50");
-  const offsetValue = Number(searchParams.get("offset") ?? "0");
+  const body = (await req.json().catch(() => null)) as { uris?: unknown } | null;
+  const uris = Array.isArray(body?.uris)
+    ? body.uris.filter((uri): uri is string => typeof uri === "string" && uri.startsWith("spotify:track:"))
+    : [];
 
-  const limit = Number.isFinite(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 50;
-  const offset = Number.isFinite(offsetValue) ? Math.max(offsetValue, 0) : 0;
-
-  const fields =
-    "items(added_at,is_local,track(uri,name,duration_ms,track_number,artists(name),album(name,release_date))),total,limit,offset,next";
-
-  const spotifyUrl =
-    `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistID)}/items` +
-    `?limit=${limit}` +
-    `&offset=${offset}` +
-    `&market=from_token` +
-    `&fields=${encodeURIComponent(fields)}`;
-
-  const res = await spotifyFetchWithRetry(spotifyUrl, accessToken);
-  const data = await res.json().catch(() => null);
-
-  if (!res.ok) {
-    return NextResponse.json(
-      {
-        error:
-          (data as any)?.error?.message ||
-          (data as any)?.message ||
-          "Spotify request failed",
-        spotify: data,
-        playlistID,
-        limit,
-        offset,
-      },
-      { status: res.status }
-    );
+  if (uris.length === 0) {
+    return NextResponse.json({ error: "No track URIs were provided." }, { status: 400 });
   }
 
-  return NextResponse.json({
-    items: Array.isArray((data as any)?.items) ? (data as any).items : [],
-    total: Number((data as any)?.total ?? 0),
-    limit: Number((data as any)?.limit ?? limit),
-    offset: Number((data as any)?.offset ?? offset),
-    next: typeof (data as any)?.next === "string" ? (data as any).next : null,
-  });
+  try {
+    const chunks = chunk(uris, 100);
+    let lastSnapshotId: string | undefined;
+    const itemsUrl = `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistID)}/items`;
+
+    const first = await spotifyWrite(itemsUrl, accessToken, "PUT", chunks[0] ?? [], scope);
+    lastSnapshotId = first?.snapshot_id;
+
+    for (let i = 1; i < chunks.length; i += 1) {
+      const appended = await spotifyWrite(itemsUrl, accessToken, "POST", chunks[i], scope);
+      lastSnapshotId = appended?.snapshot_id ?? lastSnapshotId;
+    }
+
+    return NextResponse.json({
+      ok: true,
+      snapshot_id: lastSnapshotId ?? null,
+      total: uris.length,
+    });
+  } catch (response) {
+    if (response instanceof Response) {
+      return response;
+    }
+
+    return NextResponse.json({ error: "Spotify playlist update failed" }, { status: 502 });
+  }
 }
