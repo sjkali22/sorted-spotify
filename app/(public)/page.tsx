@@ -71,23 +71,23 @@ export default async function LandingPage() {
               </a>
             </div>
 
-            <div className="mx-auto mt-7 grid max-w-xl gap-3 text-sm text-text-secondary">
-              <div className="flex items-center justify-center gap-2">
-                <span className="text-accent">
+            <div className="mx-auto mt-7 grid w-fit max-w-xl gap-3 text-sm text-text-secondary">
+              <div className="grid grid-cols-[1.25rem_1fr] items-start gap-3 text-left">
+                <span className="mt-0.5 text-accent">
                   <CheckIcon />
                 </span>
                 <span>Sort and organise tracks with useful tools</span>
               </div>
 
-              <div className="flex items-center justify-center gap-2">
-                <span className="text-accent">
+              <div className="grid grid-cols-[1.25rem_1fr] items-start gap-3 text-left">
+                <span className="mt-0.5 text-accent">
                   <CheckIcon />
                 </span>
                 <span>Remove duplicates and unavailable tracks</span>
               </div>
 
-              <div className="flex items-center justify-center gap-2">
-                <span className="text-accent">
+              <div className="grid grid-cols-[1.25rem_1fr] items-start gap-3 text-left">
+                <span className="mt-0.5 text-accent">
                   <CheckIcon />
                 </span>
                 <span>Export your playlists with safety-first UX</span>
@@ -106,17 +106,17 @@ export default async function LandingPage() {
         </div>
 
         <div className="mt-10 grid gap-4 md:grid-cols-3">
-          <div className="rounded-2xl border border-border bg-surface p-6">
+          <div className="rounded-2xl border border-border bg-surface p-6 text-center">
             <div className="text-sm font-semibold text-text-primary">Stats</div>
             <p className="mt-2 text-sm text-text-secondary">View your top artists, tracks and albums at a glance.</p>
           </div>
 
-          <div className="rounded-2xl border border-border bg-surface p-6">
+          <div className="rounded-2xl border border-border bg-surface p-6 text-center">
             <div className="text-sm font-semibold text-text-primary">Playlists</div>
             <p className="mt-2 text-sm text-text-secondary">View your playlists and edit with range of advanced tools.</p>
           </div>
 
-          <div className="rounded-2xl border border-border bg-surface p-6">
+          <div className="rounded-2xl border border-border bg-surface p-6 text-center">
             <div className="text-sm font-semibold text-text-primary">Tools</div>
             <p className="mt-2 text-sm text-text-secondary">Sort, shuffle, and remove unavailable tracks, from playlists.</p>
           </div>
