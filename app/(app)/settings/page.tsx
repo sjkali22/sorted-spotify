@@ -37,16 +37,12 @@ export default function SettingsPage() {
   const sessionLabel =
     status === "authenticated" ? "Active" : status === "loading" ? "Loading" : "None";
 
-  function openSpotifyApps() {
-    window.open("https://www.spotify.com/account/apps/", "_blank", "noopener,noreferrer");
-  }
-
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-text-primary">Settings</h1>
         <p className="mt-1 text-sm text-text-muted">
-          Manage your profile view and app access in one place.
+          Manage your profile in one place.
         </p>
       </div>
 
@@ -113,29 +109,6 @@ export default function SettingsPage() {
                 <span className="text-right text-text-primary">{email}</span>
               </div>
             </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-2xl border border-border bg-surface p-6">
-        <h2 className="text-lg font-semibold text-text-primary">Data &amp; Access</h2>
-        <p className="mt-1 text-sm text-text-muted">
-          Control Spotify access for SORTED.
-        </p>
-
-        <div className="mt-6">
-          <div className="rounded-xl border border-border bg-primary/35 p-5">
-            <div className="text-sm font-semibold text-text-primary">Spotify access</div>
-            <p className="mt-2 text-sm leading-6 text-text-secondary">
-              To fully revoke SORTED&apos;s access, remove it from your Spotify account apps page.
-            </p>
-
-            <button
-              onClick={openSpotifyApps}
-              className="mt-4 w-full rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-hover active:bg-accent-pressed focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[rgba(59,130,246,0.45)]"
-            >
-              Open Spotify access apps
-            </button>
           </div>
         </div>
       </section>
